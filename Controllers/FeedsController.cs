@@ -28,94 +28,57 @@ namespace BackEnd.Controllers
         }
 
         [HttpPost("uploadFeed")]
-        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model, [FromQuery] bool isChunked = false)
+        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model, [FromQuery] bool isChunked = false, [FromForm] string? uploadSessionId = null, [FromForm] string? blockId = null)
         {
             try
             {
                 if (!ModelState.IsValid)
-                {
                     return BadRequest(ModelState);
-                }
 
                 if (model.File.Length > 524288000) // 500 MB limit
-                {
                     return BadRequest("File size exceeds the maximum allowed size of 0.5 GB.");
-                }
 
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
                 string fileName = model.FileName;
-                int suffix = 0;
-                int maxRetries = 1000;
-
-                // Generate a unique file name if one already exists
-                while (await containerClient.GetBlobClient(fileName).ExistsAsync())
-                {
-                    if (++suffix > maxRetries)
-                    {
-                        return StatusCode(500, "Too many retries while generating a unique file name.");
-                    }
-                    var fileExtension = Path.GetExtension(model.FileName);
-                    var fileNameWithoutExt = Path.GetFileNameWithoutExtension(model.FileName);
-                    fileName = $"{fileNameWithoutExt}-{suffix}{fileExtension}";
-                }
-
-                var blobClient = containerClient.GetBlockBlobClient(fileName);
+                string uploadSession = uploadSessionId ?? Guid.NewGuid().ToString();
+                var blobClient = containerClient.GetBlockBlobClient($"{uploadSession}_{fileName}");
 
                 if (isChunked)
                 {
-                    // Chunked upload logic
-                    List<string> blockIds = new List<string>();
-                    const int chunkSize = 4 * 1024 * 1024; // 4 MB
-                    var stream = model.File.OpenReadStream();
-                    long totalBytes = model.File.Length;
-                    long bytesUploaded = 0;
-                    int blockIndex = 0;
+                    if (blockId == null)
+                        return BadRequest("Block ID is required for chunked uploads.");
 
-                    byte[] buffer = new byte[chunkSize];
-                    int bytesRead;
-
-                    while ((bytesRead = await stream.ReadAsync(buffer, 0, chunkSize)) > 0)
-                    {
-                        // Generate a base64-encoded block ID
-                        string blockId = Convert.ToBase64String(Encoding.UTF8.GetBytes($"block-{blockIndex:D6}"));
-                        blockIds.Add(blockId);
-
-                        using (var blockStream = new MemoryStream(buffer, 0, bytesRead))
-                        {
-                            await blobClient.StageBlockAsync(blockId, blockStream);
-                        }
-
-                        bytesUploaded += bytesRead;
-                        blockIndex++;
-                    }
-
-                    // Commit the block list
-                    await blobClient.CommitBlockListAsync(blockIds);
+                    await using var chunkStream = model.File.OpenReadStream();
+                    await blobClient.StageBlockAsync(blockId, chunkStream);
+                    return Ok(new { Message = "Chunk uploaded successfully." });
                 }
                 else
                 {
-                    // Standard upload logic
-                    await using var stream = model.File.OpenReadStream();
-                    await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = model.File.ContentType });
+                    var blockList = await blobClient.GetBlockListAsync(BlockListTypes.All);
+                    var blockIds = blockList.Value.UncommittedBlocks.Select(b => b.Name).ToList();
+
+                    if (blockIds.Count == 0)
+                        return BadRequest("No uncommitted blocks found to finalize the upload.");
+
+                    await blobClient.CommitBlockListAsync(blockIds);
+
+                    var blobUrl = $"{_cdnBaseUrl}{blobClient.Name}";
+
+                    var userPost = new UserPost
+                    {
+                        PostId = Guid.NewGuid().ToString(),
+                        Title = model.ProfilePic,
+                        Content = blobUrl,
+                        Caption = model.Caption,
+                        AuthorId = model.UserId,
+                        AuthorUsername = model.UserName,
+                        DateCreated = DateTime.UtcNow,
+                    };
+
+                    await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
+
+                    return Ok(new { Message = "Feed uploaded successfully.", FeedId = userPost.PostId });
                 }
-
-                var blobUrl = $"{_cdnBaseUrl}{fileName}";
-
-                // Save metadata and other details in Cosmos DB
-                var userPost = new UserPost
-                {
-                    PostId = Guid.NewGuid().ToString(),
-                    Title = model.ProfilePic,
-                    Content = blobUrl,
-                    Caption = model.Caption,
-                    AuthorId = model.UserId,
-                    AuthorUsername = model.UserName,
-                    DateCreated = DateTime.UtcNow,
-                };
-
-                await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
-
-                return Ok(new { Message = "Feed uploaded successfully.", FeedId = userPost.PostId });
             }
             catch (CosmosException ex)
             {
