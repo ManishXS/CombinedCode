@@ -1,10 +1,12 @@
 ﻿using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
 using BackEnd.Entities;
 using BackEnd.Models;
 using BackEnd.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Cosmos;
+using System.Text;
 
 namespace BackEnd.Controllers
 {
@@ -26,7 +28,7 @@ namespace BackEnd.Controllers
         }
 
         [HttpPost("uploadFeed")]
-        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model)
+        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model, [FromQuery] bool isChunked = false)
         {
             try
             {
@@ -35,11 +37,17 @@ namespace BackEnd.Controllers
                     return BadRequest(ModelState);
                 }
 
+                if (model.File.Length > 524288000) // 500 MB limit
+                {
+                    return BadRequest("File size exceeds the maximum allowed size of 0.5 GB.");
+                }
+
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
                 string fileName = model.FileName;
                 int suffix = 0;
                 int maxRetries = 1000;
 
+                // Generate a unique file name if one already exists
                 while (await containerClient.GetBlobClient(fileName).ExistsAsync())
                 {
                     if (++suffix > maxRetries)
@@ -51,12 +59,49 @@ namespace BackEnd.Controllers
                     fileName = $"{fileNameWithoutExt}-{suffix}{fileExtension}";
                 }
 
-                var blobClient = containerClient.GetBlobClient(fileName);
-                await using var stream = model.File.OpenReadStream();
-                await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = model.File.ContentType });
+                var blobClient = containerClient.GetBlockBlobClient(fileName);
 
-                var blobUrl = $"{_cdnBaseUrl}{fileName}"; 
+                if (isChunked)
+                {
+                    // Chunked upload logic
+                    List<string> blockIds = new List<string>();
+                    const int chunkSize = 4 * 1024 * 1024; // 4 MB
+                    var stream = model.File.OpenReadStream();
+                    long totalBytes = model.File.Length;
+                    long bytesUploaded = 0;
+                    int blockIndex = 0;
 
+                    byte[] buffer = new byte[chunkSize];
+                    int bytesRead;
+
+                    while ((bytesRead = await stream.ReadAsync(buffer, 0, chunkSize)) > 0)
+                    {
+                        // Generate a base64-encoded block ID
+                        string blockId = Convert.ToBase64String(Encoding.UTF8.GetBytes($"block-{blockIndex:D6}"));
+                        blockIds.Add(blockId);
+
+                        using (var blockStream = new MemoryStream(buffer, 0, bytesRead))
+                        {
+                            await blobClient.StageBlockAsync(blockId, blockStream);
+                        }
+
+                        bytesUploaded += bytesRead;
+                        blockIndex++;
+                    }
+
+                    // Commit the block list
+                    await blobClient.CommitBlockListAsync(blockIds);
+                }
+                else
+                {
+                    // Standard upload logic
+                    await using var stream = model.File.OpenReadStream();
+                    await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = model.File.ContentType });
+                }
+
+                var blobUrl = $"{_cdnBaseUrl}{fileName}";
+
+                // Save metadata and other details in Cosmos DB
                 var userPost = new UserPost
                 {
                     PostId = Guid.NewGuid().ToString(),
@@ -81,6 +126,33 @@ namespace BackEnd.Controllers
                 return StatusCode(500, $"Unexpected error: {ex.Message}");
             }
         }
+
+
+        [HttpGet("streamVideo")]
+        public async Task<IActionResult> StreamVideo(string fileName)
+        {
+            try
+            {
+                var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
+                var blobClient = containerClient.GetBlobClient(fileName);
+
+                if (!await blobClient.ExistsAsync())
+                    return NotFound("Video not found.");
+
+                var properties = await blobClient.GetPropertiesAsync();
+                var stream = await blobClient.OpenReadAsync();
+
+                Response.Headers.Add("Accept-Ranges", "bytes");
+
+                return File(stream, properties.Value.ContentType, enableRangeProcessing: true);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error streaming video: {ex.Message}");
+            }
+        }
+
+
 
         [HttpGet("getUserFeeds")]
         public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 10)
