@@ -2,6 +2,7 @@
 using Azure.Storage.Blobs;
 using BackEnd.Entities;
 using Microsoft.Azure.Cosmos;
+using Microsoft.OpenApi.Models;
 
 namespace BackEnd
 {
@@ -20,17 +21,17 @@ namespace BackEnd
             {
                 Console.WriteLine("Starting ConfigureServices...");
 
-               var appConfigConnectionString = "Endpoint=https://azurermtenx.azconfig.io;" +
+                // Azure App Configuration
+                var appConfigConnectionString = "Endpoint=https://azurermtenx.azconfig.io;" +
                                  "Id=8FPB;" +
-                                 "Secret=" +
-                                 "3NCoPOSo0Y1ykrX6ih9ObYVbY2ZA6RLqaXyMyBI04eB5k4wkhpA5JQQJ99AKACGhslBY0DYHAAACAZAC1woJ";
+                                 "Secret=3NCoPOSo0Y1ykrX6ih9ObYVbY2ZA6RLqaXyMyBI04eB5k4wkhpA5JQQJ99AKACGhslBY0DYHAAACAZAC1woJ";
 
                 var updatedConfiguration = new ConfigurationBuilder()
                     .AddConfiguration(_configuration)
                     .AddAzureAppConfiguration(options =>
                     {
                         options.Connect(appConfigConnectionString)
-                               .ConfigureKeyVault(kv => kv.SetCredential(new DefaultAzureCredential())); 
+                               .ConfigureKeyVault(kv => kv.SetCredential(new DefaultAzureCredential()));
                     })
                     .Build();
 
@@ -43,6 +44,7 @@ namespace BackEnd
                     throw new Exception("Required configuration is missing. Check CosmosDbConnectionString, BlobConnectionString, and ApiKey.");
                 }
 
+                // Cosmos DB Client
                 CosmosClientOptions clientOptions = new CosmosClientOptions
                 {
                     ConnectionMode = ConnectionMode.Direct,
@@ -53,23 +55,34 @@ namespace BackEnd
                 services.AddSingleton(cosmosClient);
                 services.AddScoped<CosmosDbContext>();
 
+                // Blob Service Client
                 services.AddSingleton(x => new BlobServiceClient(blobConnectionString));
 
+                // Inject updated configuration
                 services.AddSingleton<IConfiguration>(updatedConfiguration);
 
+                // CORS Configuration
                 services.AddCors(options =>
                 {
-                    options.AddPolicy("AllowAll", builder =>
+                    options.AddPolicy("AllowSpecific", builder =>
                     {
-                        builder.AllowAnyOrigin()
+                        builder.WithOrigins("https://tenxso.com")  // Restrict to allowed origins
                                .AllowAnyHeader()
-                               .AllowAnyMethod();
+                               .AllowAnyMethod()
+                               .AllowCredentials();
                     });
                 });
-                services.AddSignalR();
-                services.AddControllers();
-                services.AddSwaggerGen();
 
+                // SignalR for real-time communication
+                services.AddSignalR();
+
+                // Controllers and Swagger
+                services.AddControllers();
+                services.AddSwaggerGen(c =>
+                {
+                    c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
+                //    c.EnableAnnotations(); // Optional: Enables Swagger annotations
+                });
             }
             catch (Exception ex)
             {
@@ -94,8 +107,11 @@ namespace BackEnd
 
                 app.UseHttpsRedirection();
                 app.UseRouting();
-                app.UseMiddleware<SkipAuthorizationMiddleware>();
 
+                // CORS
+                app.UseCors("AllowSpecific");
+
+                // Logging Middleware
                 app.Use(async (context, next) =>
                 {
                     logger.LogInformation("Incoming Request: {Method} {Path}", context.Request.Method, context.Request.Path);
@@ -103,20 +119,14 @@ namespace BackEnd
                     logger.LogInformation("Response Status: {StatusCode}", context.Response.StatusCode);
                 });
 
+                // Middleware for skipping authorization (only if intentional)
+                app.UseMiddleware<SkipAuthorizationMiddleware>();
 
-                app.UseCors(builder => builder
-                    .WithOrigins("https://tenxso.com")  // Explicitly specify the allowed origin
-                    .AllowAnyHeader()                   // Allow any headers
-                    .AllowAnyMethod()                   // Allow any HTTP methods (GET, POST, etc.)
-                    .AllowCredentials());               // Allow credentials (cookies, authentication)
-
-
-                logger.LogInformation("Middleware configured.");
-
+                // Authorization and Endpoints
                 app.UseAuthorization();
                 app.UseEndpoints(endpoints =>
                 {
-
+                    endpoints.MapControllers();
                     endpoints.MapHub<ChatHub>("/chatHub");
                 });
 
