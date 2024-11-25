@@ -31,32 +31,26 @@ namespace BackEnd.Controllers
             try
             {
                 if (!ModelState.IsValid)
-                {
                     return BadRequest(ModelState);
-                }
+
+                if (model.File.Length > 524288000) // 500 MB limit
+                    return BadRequest("File size exceeds the maximum allowed size of 0.5 GB.");
 
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
-                string fileName = model.FileName;
-                int suffix = 0;
-                int maxRetries = 1000;
 
-                while (await containerClient.GetBlobClient(fileName).ExistsAsync())
-                {
-                    if (++suffix > maxRetries)
-                    {
-                        return StatusCode(500, "Too many retries while generating a unique file name.");
-                    }
-                    var fileExtension = Path.GetExtension(model.FileName);
-                    var fileNameWithoutExt = Path.GetFileNameWithoutExtension(model.FileName);
-                    fileName = $"{fileNameWithoutExt}-{suffix}{fileExtension}";
-                }
+                // Generate a short unique filename using ShortGuidGenerator
+                var shortGuid = ShortGuidGenerator.Generate();
+                var fileExtension = Path.GetExtension(model.FileName);
+                var uniqueFileName = $"{shortGuid}{fileExtension}";
+                var blobClient = containerClient.GetBlobClient(uniqueFileName);
 
-                var blobClient = containerClient.GetBlobClient(fileName);
+                // Upload the file to Azure Blob Storage
                 await using var stream = model.File.OpenReadStream();
                 await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = model.File.ContentType });
 
-                var blobUrl = $"{_cdnBaseUrl}{fileName}"; 
+                var blobUrl = $"{_cdnBaseUrl}{uniqueFileName}";
 
+                // Save metadata to Cosmos DB
                 var userPost = new UserPost
                 {
                     PostId = Guid.NewGuid().ToString(),
@@ -70,11 +64,7 @@ namespace BackEnd.Controllers
 
                 await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
 
-                return Ok(new { Message = "Feed uploaded successfully.", FeedId = userPost.PostId });
-            }
-            catch (CosmosException ex)
-            {
-                return StatusCode(500, $"Cosmos DB error: {ex.Message}");
+                return Ok(new { Message = "Video uploaded successfully.", FeedId = userPost.PostId });
             }
             catch (Exception ex)
             {
