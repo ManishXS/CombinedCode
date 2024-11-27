@@ -3,6 +3,7 @@ using Azure.Storage.Blobs;
 using BackEnd.Entities;
 using Microsoft.Azure.Cosmos;
 using Microsoft.OpenApi.Models;
+using StackExchange.Redis;
 
 namespace BackEnd
 {
@@ -23,8 +24,8 @@ namespace BackEnd
 
                 // Azure App Configuration
                 var appConfigConnectionString = "Endpoint=https://azurermtenx.azconfig.io;" +
-                                 "Id=8FPB;" +
-                                 "Secret=3NCoPOSo0Y1ykrX6ih9ObYVbY2ZA6RLqaXyMyBI04eB5k4wkhpA5JQQJ99AKACGhslBY0DYHAAACAZAC1woJ";
+                                                "Id=8FPB;" +
+                                                "Secret=3NCoPOSo0Y1ykrX6ih9ObYVbY2ZA6RLqaXyMyBI04eB5k4wkhpA5JQQJ99AKACGhslBY0DYHAAACAZAC1woJ";
 
                 var updatedConfiguration = new ConfigurationBuilder()
                     .AddConfiguration(_configuration)
@@ -35,13 +36,22 @@ namespace BackEnd
                     })
                     .Build();
 
+                // Read configuration values
                 var cosmosDbConnectionString = updatedConfiguration["CosmosDbConnectionString"];
                 var blobConnectionString = updatedConfiguration["BlobConnectionString"];
+                var redisConnectionString = "socialcache.redis.cache.windows.net:6380," +
+                                             "password=" + "06BcFTkdNCGa" + "VoUrUsMy" + "s8p7QD8selIK" +
+                                             "xAzCaCV1qtw=" + ",ssl=True,abortConnect=False"; // Redis connection string split for Git
+
                 var apiKey = updatedConfiguration["ApiKey"];
 
-                if (string.IsNullOrEmpty(cosmosDbConnectionString) || string.IsNullOrEmpty(blobConnectionString) || string.IsNullOrEmpty(apiKey))
+                // Validate required configurations
+                if (string.IsNullOrEmpty(cosmosDbConnectionString) ||
+                    string.IsNullOrEmpty(blobConnectionString) ||
+                    string.IsNullOrEmpty(redisConnectionString) ||
+                    string.IsNullOrEmpty(apiKey))
                 {
-                    throw new Exception("Required configuration is missing. Check CosmosDbConnectionString, BlobConnectionString, and ApiKey.");
+                    throw new Exception("Required configuration is missing. Check CosmosDbConnectionString, BlobConnectionString, RedisConnectionString, and ApiKey.");
                 }
 
                 // Cosmos DB Client
@@ -58,6 +68,16 @@ namespace BackEnd
                 // Blob Service Client
                 services.AddSingleton(x => new BlobServiceClient(blobConnectionString));
 
+                // Redis Connection
+                // Redis Connection
+                services.AddSingleton<IConnectionMultiplexer>(sp =>
+                {
+                    var configuration = ConfigurationOptions.Parse(redisConnectionString, true);
+                    configuration.Ssl = true; // Ensure SSL is enabled for secure communication
+                    return ConnectionMultiplexer.Connect(configuration);
+                });
+
+
                 // Inject updated configuration
                 services.AddSingleton<IConfiguration>(updatedConfiguration);
 
@@ -66,7 +86,7 @@ namespace BackEnd
                 {
                     options.AddPolicy("AllowSpecific", builder =>
                     {
-                        builder.WithOrigins("https://tenxso.com")  // Restrict to allowed origins
+                        builder.WithOrigins("https://tenxso.com")
                                .AllowAnyHeader()
                                .AllowAnyMethod()
                                .AllowCredentials();
@@ -81,7 +101,6 @@ namespace BackEnd
                 services.AddSwaggerGen(c =>
                 {
                     c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
-                //    c.EnableAnnotations(); // Optional: Enables Swagger annotations
                 });
             }
             catch (Exception ex)

@@ -42,6 +42,8 @@ C:\CombinedFinalCode\bin\Debug\net6.0\Microsoft.IdentityModel.Abstractions.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\Microsoft.OpenApi.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\Microsoft.Win32.SystemEvents.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\Newtonsoft.Json.dll
+C:\CombinedFinalCode\bin\Debug\net6.0\Pipelines.Sockets.Unofficial.dll
+C:\CombinedFinalCode\bin\Debug\net6.0\StackExchange.Redis.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\Swashbuckle.AspNetCore.Swagger.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\Swashbuckle.AspNetCore.SwaggerGen.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\Swashbuckle.AspNetCore.SwaggerUI.dll

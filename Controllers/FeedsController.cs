@@ -5,6 +5,7 @@ using BackEnd.Models;
 using BackEnd.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Cosmos;
+using StackExchange.Redis;
 
 namespace BackEnd.Controllers
 {
@@ -18,59 +19,108 @@ namespace BackEnd.Controllers
 
 
         private static readonly string _cdnBaseUrl = "https://tenxcdn-dtg6a0dtb9aqg3bb.z02.azurefd.net/media/";
+        private readonly IConnectionMultiplexer _redis;
 
-        public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient)
+        //public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient)
+        //{
+        //    _dbContext = dbContext;
+        //    _blobServiceClient = blobServiceClient;
+        //}
+
+        public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient, IConnectionMultiplexer redis)
         {
             _dbContext = dbContext;
             _blobServiceClient = blobServiceClient;
+            _redis = redis;
         }
 
+        //[HttpPost("uploadFeed")]
+        //public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model)
+        //{
+        //    try
+        //    {
+        //        if (!ModelState.IsValid)
+        //            return BadRequest(ModelState);
+
+        //        if (model.File.Length > 524288000) // 500 MB limit
+        //            return BadRequest("File size exceeds the maximum allowed size of 0.5 GB.");
+
+        //        var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
+
+        //        // Generate a short unique filename using ShortGuidGenerator
+        //        var shortGuid = ShortGuidGenerator.Generate();
+        //        var fileExtension = Path.GetExtension(model.FileName);
+        //        var uniqueFileName = $"{shortGuid}{fileExtension}";
+        //        var blobClient = containerClient.GetBlobClient(uniqueFileName);
+
+        //        // Upload the file to Azure Blob Storage
+        //        await using var stream = model.File.OpenReadStream();
+        //        await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = model.File.ContentType });
+
+        //        var blobUrl = $"{_cdnBaseUrl}{uniqueFileName}";
+
+        //        // Save metadata to Cosmos DB
+        //        var userPost = new UserPost
+        //        {
+        //            PostId = Guid.NewGuid().ToString(),
+        //            Title = model.ProfilePic,
+        //            Content = blobUrl,
+        //            Caption = model.Caption,
+        //            AuthorId = model.UserId,
+        //            AuthorUsername = model.UserName,
+        //            DateCreated = DateTime.UtcNow,
+        //        };
+
+        //        await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
+
+        //        return Ok(new { Message = "Video uploaded successfully.", FeedId = userPost.PostId });
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        return StatusCode(500, $"Unexpected error: {ex.Message}");
+        //    }
+        //}
+
         [HttpPost("uploadFeed")]
-        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model)
+        public async Task<IActionResult> UploadFeed([FromForm] IFormFile file, [FromForm] string uploadId)
         {
             try
             {
-                if (!ModelState.IsValid)
-                    return BadRequest(ModelState);
+                // Redis initialization
+                var db = _redis.GetDatabase();
 
-                if (model.File.Length > 524288000) // 500 MB limit
-                    return BadRequest("File size exceeds the maximum allowed size of 0.5 GB.");
+                // Blob initialization
+                var containerClient = _blobServiceClient.GetBlobContainerClient("media");
+                var blobClient = containerClient.GetBlobClient(uploadId);
 
-                var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
+                // Redis: Track uploaded chunks
+                var totalChunksValue = await db.StringGetAsync($"{uploadId}:totalChunks");
+                var totalChunks = int.Parse(totalChunksValue.IsNullOrEmpty ? "0" : totalChunksValue.ToString());
 
-                // Generate a short unique filename using ShortGuidGenerator
-                var shortGuid = ShortGuidGenerator.Generate();
-                var fileExtension = Path.GetExtension(model.FileName);
-                var uniqueFileName = $"{shortGuid}{fileExtension}";
-                var blobClient = containerClient.GetBlobClient(uniqueFileName);
+                var currentChunkValue = await db.StringGetAsync($"{uploadId}:currentChunk");
+                var currentChunk = int.Parse(currentChunkValue.IsNullOrEmpty ? "0" : currentChunkValue.ToString());
 
-                // Upload the file to Azure Blob Storage
-                await using var stream = model.File.OpenReadStream();
-                await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = model.File.ContentType });
 
-                var blobUrl = $"{_cdnBaseUrl}{uniqueFileName}";
-
-                // Save metadata to Cosmos DB
-                var userPost = new UserPost
+                using (var stream = file.OpenReadStream())
                 {
-                    PostId = Guid.NewGuid().ToString(),
-                    Title = model.ProfilePic,
-                    Content = blobUrl,
-                    Caption = model.Caption,
-                    AuthorId = model.UserId,
-                    AuthorUsername = model.UserName,
-                    DateCreated = DateTime.UtcNow,
-                };
+                    await blobClient.UploadAsync(stream, overwrite: true);
+                }
 
-                await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
+                // Commit file if it's the last chunk
+                if (currentChunk + 1 == totalChunks)
+                {
+                    await db.KeyDeleteAsync(uploadId);
+                    return Ok("File upload completed.");
+                }
 
-                return Ok(new { Message = "Video uploaded successfully.", FeedId = userPost.PostId });
+                return Ok($"Chunk {currentChunk} uploaded.");
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Unexpected error: {ex.Message}");
+                return StatusCode(500, $"Error: {ex.Message}");
             }
         }
+
 
         [HttpGet("getUserFeeds")]
         public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 10)

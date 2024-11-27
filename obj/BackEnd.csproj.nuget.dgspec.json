@@ -63,7 +63,7 @@
             },
             "Azure.Storage.Blobs": {
               "target": "Package",
-              "version": "[12.22.2, )"
+              "version": "[12.23.0, )"
             },
             "Microsoft.Azure.Cosmos": {
               "target": "Package",
@@ -80,6 +80,10 @@
             "Newtonsoft.Json": {
               "target": "Package",
               "version": "[13.0.3, )"
+            },
+            "StackExchange.Redis": {
+              "target": "Package",
+              "version": "[2.8.16, )"
             },
             "Swashbuckle.AspNetCore": {
               "target": "Package",
