@@ -1,4 +1,5 @@
-﻿using Azure.Storage.Blobs;
+﻿using Azure.Storage;
+using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using BackEnd.Entities;
 using BackEnd.Models;
@@ -20,96 +21,90 @@ namespace BackEnd.Controllers
 
         private static readonly string _cdnBaseUrl = "https://tenxcdn-dtg6a0dtb9aqg3bb.z02.azurefd.net/media/";
         private readonly IConnectionMultiplexer _redis;
+        private readonly ILogger<FeedsController> _logger;
 
-        //public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient)
+        //public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient, IConnectionMultiplexer redis)
         //{
         //    _dbContext = dbContext;
         //    _blobServiceClient = blobServiceClient;
+        //    _redis = redis;
         //}
 
-        public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient, IConnectionMultiplexer redis)
+        public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient, IConnectionMultiplexer redis, ILogger<FeedsController> logger)
         {
             _dbContext = dbContext;
             _blobServiceClient = blobServiceClient;
             _redis = redis;
+            _logger = logger; // Initialize logger
         }
-
-        //[HttpPost("uploadFeed")]
-        //public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model)
-        //{
-        //    try
-        //    {
-        //        if (!ModelState.IsValid)
-        //            return BadRequest(ModelState);
-
-        //        if (model.File.Length > 524288000) // 500 MB limit
-        //            return BadRequest("File size exceeds the maximum allowed size of 0.5 GB.");
-
-        //        var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
-
-        //        // Generate a short unique filename using ShortGuidGenerator
-        //        var shortGuid = ShortGuidGenerator.Generate();
-        //        var fileExtension = Path.GetExtension(model.FileName);
-        //        var uniqueFileName = $"{shortGuid}{fileExtension}";
-        //        var blobClient = containerClient.GetBlobClient(uniqueFileName);
-
-        //        // Upload the file to Azure Blob Storage
-        //        await using var stream = model.File.OpenReadStream();
-        //        await blobClient.UploadAsync(stream, new BlobHttpHeaders { ContentType = model.File.ContentType });
-
-        //        var blobUrl = $"{_cdnBaseUrl}{uniqueFileName}";
-
-        //        // Save metadata to Cosmos DB
-        //        var userPost = new UserPost
-        //        {
-        //            PostId = Guid.NewGuid().ToString(),
-        //            Title = model.ProfilePic,
-        //            Content = blobUrl,
-        //            Caption = model.Caption,
-        //            AuthorId = model.UserId,
-        //            AuthorUsername = model.UserName,
-        //            DateCreated = DateTime.UtcNow,
-        //        };
-
-        //        await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
-
-        //        return Ok(new { Message = "Video uploaded successfully.", FeedId = userPost.PostId });
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return StatusCode(500, $"Unexpected error: {ex.Message}");
-        //    }
-        //}
-
         [HttpPost("uploadFeed")]
         public async Task<IActionResult> UploadFeed([FromForm] IFormFile file, [FromForm] string uploadId)
         {
             try
             {
-                // Redis initialization
+                _logger.LogInformation("Starting upload process for uploadId: {UploadId}", uploadId);
+
+                // Validate Input
+                if (file == null || file.Length == 0)
+                {
+                    _logger.LogError("No file provided or file is empty for uploadId: {UploadId}", uploadId);
+                    return BadRequest("No file provided or file is empty.");
+                }
+
+                if (string.IsNullOrEmpty(uploadId))
+                {
+                    _logger.LogError("UploadId is missing.");
+                    return BadRequest("UploadId is required.");
+                }
+
+                _logger.LogInformation("Received file: {FileName}, Size: {FileSize}, UploadId: {UploadId}", file.FileName, file.Length, uploadId);
+
+                // Redis Setup
                 var db = _redis.GetDatabase();
+                _logger.LogInformation("Connecting to Redis...");
+                var pingResult = await db.PingAsync();
+                _logger.LogInformation("Redis connection successful. Ping: {PingResult}", pingResult);
 
-                // Blob initialization
-                var containerClient = _blobServiceClient.GetBlobContainerClient("media");
-                var blobClient = containerClient.GetBlobClient(uploadId);
-
-                // Redis: Track uploaded chunks
-                var totalChunksValue = await db.StringGetAsync($"{uploadId}:totalChunks");
-                var totalChunks = int.Parse(totalChunksValue.IsNullOrEmpty ? "0" : totalChunksValue.ToString());
-
+                // Track Current Chunk
                 var currentChunkValue = await db.StringGetAsync($"{uploadId}:currentChunk");
                 var currentChunk = int.Parse(currentChunkValue.IsNullOrEmpty ? "0" : currentChunkValue.ToString());
+                _logger.LogInformation("Current chunk index for uploadId {UploadId}: {CurrentChunk}", uploadId, currentChunk);
 
+                // Azure Blob Storage
+                _logger.LogInformation("Connecting to Azure Blob Storage...");
+                var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
+                var blobClient = containerClient.GetBlobClient(uploadId);
 
+                if (!await containerClient.ExistsAsync())
+                {
+                    _logger.LogError("Blob container '{Container}' does not exist.", _feedContainer);
+                    return StatusCode(500, "Blob container does not exist.");
+                }
+                _logger.LogInformation("Blob container '{Container}' is available.", _feedContainer);
+
+                // Upload Chunk
+                _logger.LogInformation("Uploading chunk for uploadId {UploadId}, ChunkIndex: {ChunkIndex}", uploadId, currentChunk);
                 using (var stream = file.OpenReadStream())
                 {
                     await blobClient.UploadAsync(stream, overwrite: true);
                 }
+                _logger.LogInformation("Chunk upload successful for uploadId: {UploadId}, ChunkIndex: {ChunkIndex}", uploadId, currentChunk);
 
-                // Commit file if it's the last chunk
-                if (currentChunk + 1 == totalChunks)
+                // Increment Current Chunk
+                currentChunk++;
+                await db.StringSetAsync($"{uploadId}:currentChunk", currentChunk);
+                _logger.LogInformation("Updated current chunk index in Redis for uploadId: {UploadId}. CurrentChunk: {CurrentChunk}", uploadId, currentChunk);
+
+                // Handle Final Chunk
+                var totalChunksValue = await db.StringGetAsync($"{uploadId}:totalChunks");
+                var totalChunks = int.Parse(totalChunksValue.IsNullOrEmpty ? "0" : totalChunksValue.ToString());
+                _logger.LogInformation("Total chunks for uploadId {UploadId}: {TotalChunks}", uploadId, totalChunks);
+
+                if (currentChunk == totalChunks)
                 {
-                    await db.KeyDeleteAsync(uploadId);
+                    _logger.LogInformation("All chunks received for uploadId: {UploadId}. Finalizing upload.", uploadId);
+                    await db.KeyDeleteAsync($"{uploadId}:currentChunk");
+                    await db.KeyDeleteAsync($"{uploadId}:totalChunks");
                     return Ok("File upload completed.");
                 }
 
@@ -117,7 +112,8 @@ namespace BackEnd.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Error: {ex.Message}");
+                _logger.LogError(ex, "Error occurred during file upload for uploadId: {UploadId}", uploadId);
+                return StatusCode(500, $"Internal Server Error: {ex.Message}");
             }
         }
 
