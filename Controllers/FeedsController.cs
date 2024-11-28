@@ -37,6 +37,7 @@ namespace BackEnd.Controllers
             _redis = redis;
             _logger = logger; // Initialize logger
         }
+
         [HttpPost("uploadFeed")]
         public async Task<IActionResult> UploadFeed([FromForm] IFormFile file, [FromForm] string uploadId)
         {
@@ -44,6 +45,7 @@ namespace BackEnd.Controllers
             {
                 _logger.LogInformation("Starting upload process for uploadId: {UploadId}", uploadId);
 
+                // Validate Input
                 if (file == null || file.Length == 0)
                 {
                     _logger.LogError("No file provided for uploadId: {UploadId}", uploadId);
@@ -56,11 +58,14 @@ namespace BackEnd.Controllers
                     return BadRequest("UploadId is required.");
                 }
 
+                // Generate Unique Blob Name
                 var uniqueBlobName = $"{ShortGuidGenerator.Generate()}_{file.FileName}";
-                var db = _redis.GetDatabase();
 
-                // Check Redis Lock
+                // Redis Setup
+                var db = _redis.GetDatabase();
                 var uploadLockKey = $"{uploadId}:lock";
+
+                // Check for Lock
                 var isLocked = await db.StringGetAsync(uploadLockKey);
                 if (!isLocked.IsNullOrEmpty)
                 {
@@ -68,42 +73,72 @@ namespace BackEnd.Controllers
                     return Conflict("Upload already in progress.");
                 }
 
+                // Lock the upload process for this uploadId
                 await db.StringSetAsync(uploadLockKey, "locked", TimeSpan.FromHours(1));
 
-                const int chunkSize = 5 * 1024 * 1024;
+                // Chunk Configuration
+                const int chunkSize = 5 * 1024 * 1024; // 5 MB per chunk
                 var totalChunks = (int)Math.Ceiling((double)file.Length / chunkSize);
 
+                // Store total chunks in Redis
                 await db.StringSetAsync($"{uploadId}:totalChunks", totalChunks);
-
-                var currentChunk = 0;
+                _logger.LogInformation("Total chunks calculated: {TotalChunks} for uploadId: {UploadId}", totalChunks, uploadId);
 
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
                 var blobClient = containerClient.GetBlobClient(uniqueBlobName);
 
+                // Check if Blob Container Exists
                 if (!await containerClient.ExistsAsync())
                 {
                     _logger.LogError("Blob container '{Container}' does not exist.", _feedContainer);
                     return StatusCode(500, "Blob container does not exist.");
                 }
 
+                _logger.LogInformation("Blob container '{Container}' exists.", _feedContainer);
+
+                // Upload First Chunk
                 using (var stream = file.OpenReadStream())
                 {
-                    for (int chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++)
-                    {
-                        byte[] chunkData = new byte[Math.Min(chunkSize, (int)(file.Length - (chunkIndex * chunkSize)))];
-                        await stream.ReadAsync(chunkData, 0, chunkData.Length);
+                    var firstChunkSize = Math.Min(chunkSize, (int)file.Length);
+                    var firstChunkData = new byte[firstChunkSize];
+                    await stream.ReadAsync(firstChunkData, 0, firstChunkSize);
 
-                        await blobClient.UploadAsync(new BinaryData(chunkData), overwrite: true);
-                        currentChunk++;
+                    _logger.LogInformation("Uploading first chunk for uploadId: {UploadId}", uploadId);
+                    await blobClient.UploadAsync(new BinaryData(firstChunkData), overwrite: true);
 
-                        await db.StringSetAsync($"{uploadId}:currentChunk", currentChunk);
-                    }
+                    // Update Redis for the first chunk
+                    await db.StringSetAsync($"{uploadId}:currentChunk", 1);
+                    _logger.LogInformation("First chunk uploaded successfully for uploadId: {UploadId}");
                 }
 
+                // Upload Remaining Chunks in Parallel
+                var uploadTasks = new List<Task>();
+                using (var stream = file.OpenReadStream())
+                {
+                    for (int chunkIndex = 1; chunkIndex < totalChunks; chunkIndex++)
+                    {
+                        var chunkStart = chunkIndex * chunkSize;
+                        var chunkEnd = Math.Min((chunkIndex + 1) * chunkSize, (int)file.Length);
+                        var chunkSizeToUpload = chunkEnd - chunkStart;
+
+                        byte[] chunkData = new byte[chunkSizeToUpload];
+                        stream.Seek(chunkStart, SeekOrigin.Begin);
+                        await stream.ReadAsync(chunkData, 0, chunkSizeToUpload);
+
+                        uploadTasks.Add(UploadChunkAsync(blobClient, chunkData, chunkIndex, db, uploadId));
+                    }
+
+                    await Task.WhenAll(uploadTasks);
+                }
+
+                _logger.LogInformation("All chunks uploaded for uploadId: {UploadId}. Finalizing process.", uploadId);
+
+                // Clean up Redis
                 await db.KeyDeleteAsync(uploadLockKey);
                 await db.KeyDeleteAsync($"{uploadId}:totalChunks");
                 await db.KeyDeleteAsync($"{uploadId}:currentChunk");
 
+                // Create UserPost and update Cosmos DB
                 var userPost = new UserPost
                 {
                     PostId = Guid.NewGuid().ToString(),
@@ -116,13 +151,40 @@ namespace BackEnd.Controllers
                 };
 
                 await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
+                _logger.LogInformation("UserPost created and saved to Cosmos DB for uploadId: {UploadId}", uploadId);
 
                 return Ok(new { Message = "Upload successful", PostId = userPost.PostId });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during upload for uploadId: {UploadId}", uploadId);
+
+                // Unlock the upload process in case of error
+                var uploadLockKey = $"{uploadId}:lock";
+                await _redis.GetDatabase().KeyDeleteAsync(uploadLockKey);
+
                 return StatusCode(500, "Internal server error.");
+            }
+        }
+
+        /// <summary>
+        /// Uploads a single chunk asynchronously and updates Redis with the progress.
+        /// </summary>
+        private async Task UploadChunkAsync(BlobClient blobClient, byte[] chunkData, int chunkIndex, IDatabase db, string uploadId)
+        {
+            try
+            {
+                _logger.LogInformation("Uploading chunk {ChunkIndex} for uploadId: {UploadId}", chunkIndex + 1, uploadId);
+                await blobClient.UploadAsync(new BinaryData(chunkData), overwrite: false);
+                _logger.LogInformation("Chunk {ChunkIndex} uploaded successfully for uploadId: {UploadId}", chunkIndex + 1, uploadId);
+
+                // Update Redis with the current chunk progress
+                await db.StringSetAsync($"{uploadId}:currentChunk", chunkIndex + 1);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading chunk {ChunkIndex} for uploadId: {UploadId}", chunkIndex + 1, uploadId);
+                throw;
             }
         }
 
