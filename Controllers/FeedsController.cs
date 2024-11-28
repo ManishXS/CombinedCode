@@ -1,12 +1,12 @@
-﻿using Azure.Storage;
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using BackEnd.Entities;
-using BackEnd.Models;
-using BackEnd.ViewModels;
+﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Specialized;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Cosmos;
 using StackExchange.Redis;
+using System.Text;
+using BackEnd.Entities;
+using BackEnd.Models;
+using BackEnd.ViewModels;
 
 namespace BackEnd.Controllers
 {
@@ -17,293 +17,198 @@ namespace BackEnd.Controllers
         private readonly CosmosDbContext _dbContext;
         private readonly BlobServiceClient _blobServiceClient;
         private readonly string _feedContainer = "media";
-
-
-        private static readonly string _cdnBaseUrl = "https://tenxcdn-dtg6a0dtb9aqg3bb.z02.azurefd.net/media/";
-        private readonly IConnectionMultiplexer _redis;
+        private readonly string _cdnBaseUrl = "https://tenxcdn-dtg6a0dtb9aqg3bb.z02.azurefd.net/media/";
+        private readonly IDatabase _redis;
         private readonly ILogger<FeedsController> _logger;
-
-        //public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient, IConnectionMultiplexer redis)
-        //{
-        //    _dbContext = dbContext;
-        //    _blobServiceClient = blobServiceClient;
-        //    _redis = redis;
-        //}
 
         public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient, IConnectionMultiplexer redis, ILogger<FeedsController> logger)
         {
             _dbContext = dbContext;
             _blobServiceClient = blobServiceClient;
-            _redis = redis;
-            _logger = logger; // Initialize logger
+            _redis = redis.GetDatabase(); // Corrected Redis initialization
+            _logger = logger;
         }
 
         [HttpPost("uploadFeed")]
-        public async Task<IActionResult> UploadFeed([FromForm] IFormFile file, [FromForm] string uploadId)
+        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model)
         {
             try
             {
-                _logger.LogInformation("Starting upload process for uploadId: {UploadId}", uploadId);
-
                 // Validate Input
-                if (file == null || file.Length == 0)
+                if (model.File == null || string.IsNullOrEmpty(model.UploadId) || model.ChunkIndex < 0 || model.TotalChunks <= 0 || string.IsNullOrEmpty(model.FileName))
                 {
-                    _logger.LogError("No file provided for uploadId: {UploadId}", uploadId);
-                    return BadRequest("No file provided.");
+                    return BadRequest("Missing or invalid required fields.");
                 }
 
-                if (string.IsNullOrEmpty(uploadId))
+                if (model.File.Length == 0)
                 {
-                    _logger.LogError("UploadId is missing.");
-                    return BadRequest("UploadId is required.");
+                    return BadRequest("Chunk is empty.");
                 }
 
-                // Generate Unique Blob Name
-                var uniqueBlobName = $"{ShortGuidGenerator.Generate()}_{file.FileName}";
+                // Generate Blob Name
+                var blobName = $"{ShortGuidGenerator.Generate()}_{model.FileName}";
+                var uploadKey = $"{model.UploadId}:chunks";
 
-                // Redis Setup
-                var db = _redis.GetDatabase();
-                var uploadLockKey = $"{uploadId}:lock";
-
-                // Check for Lock
-                var isLocked = await db.StringGetAsync(uploadLockKey);
-                if (!isLocked.IsNullOrEmpty)
-                {
-                    _logger.LogWarning("Upload already in progress for uploadId: {UploadId}", uploadId);
-                    return Conflict("Upload already in progress.");
-                }
-
-                // Lock the upload process for this uploadId
-                await db.StringSetAsync(uploadLockKey, "locked", TimeSpan.FromHours(1));
-
-                // Chunk Configuration
-                const int chunkSize = 5 * 1024 * 1024; // 5 MB per chunk
-                var totalChunks = (int)Math.Ceiling((double)file.Length / chunkSize);
-
-                // Store total chunks in Redis
-                await db.StringSetAsync($"{uploadId}:totalChunks", totalChunks);
-                _logger.LogInformation("Total chunks calculated: {TotalChunks} for uploadId: {UploadId}", totalChunks, uploadId);
-
+                // Get Blob container and client
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
-                var blobClient = containerClient.GetBlobClient(uniqueBlobName);
-
-                // Check if Blob Container Exists
                 if (!await containerClient.ExistsAsync())
                 {
-                    _logger.LogError("Blob container '{Container}' does not exist.", _feedContainer);
-                    return StatusCode(500, "Blob container does not exist.");
+                    return NotFound("Blob container does not exist.");
                 }
 
-                _logger.LogInformation("Blob container '{Container}' exists.", _feedContainer);
+                var blobClient = containerClient.GetBlockBlobClient(blobName);
 
-                // Upload First Chunk
-                using (var stream = file.OpenReadStream())
+                // Stage the current chunk
+                var blockId = Convert.ToBase64String(Encoding.UTF8.GetBytes(model.ChunkIndex.ToString("D6")));
+                using (var stream = model.File.OpenReadStream())
                 {
-                    var firstChunkSize = Math.Min(chunkSize, (int)file.Length);
-                    var firstChunkData = new byte[firstChunkSize];
-                    await stream.ReadAsync(firstChunkData, 0, firstChunkSize);
-
-                    _logger.LogInformation("Uploading first chunk for uploadId: {UploadId}", uploadId);
-                    await blobClient.UploadAsync(new BinaryData(firstChunkData), overwrite: true);
-
-                    // Update Redis for the first chunk
-                    await db.StringSetAsync($"{uploadId}:currentChunk", 1);
-                    _logger.LogInformation("First chunk uploaded successfully for uploadId: {UploadId}");
+                    await blobClient.StageBlockAsync(blockId, stream);
+                    _logger.LogInformation("Staged block: {BlockId}", blockId);
                 }
 
-                // Upload Remaining Chunks in Parallel
-                var uploadTasks = new List<Task>();
-                using (var stream = file.OpenReadStream())
+                _logger.LogInformation("Pinging Redis before starting upload...");
+                try
                 {
-                    for (int chunkIndex = 1; chunkIndex < totalChunks; chunkIndex++)
+                    var pingResult = await _redis.PingAsync();
+                    _logger.LogInformation("Redis ping successful. Response time: {ResponseTime}", pingResult);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Redis ping failed.");
+                    return StatusCode(500, "Redis connection error.");
+                }
+                // Add the chunk to Redis
+                await _redis.SetAddAsync(uploadKey, model.ChunkIndex.ToString());
+                _logger.LogInformation("Added chunk {ChunkIndex} to Redis for UploadId {UploadId}", model.ChunkIndex, model.UploadId);
+
+                // If this is the last chunk, finalize the blob
+                if (model.ChunkIndex == model.TotalChunks - 1)
+                {
+                    // Retrieve all uploaded chunks from Redis
+                    var uploadedChunks = await _redis.SetMembersAsync(uploadKey);
+                    var uploadedChunkIndices = uploadedChunks.Select(x => int.Parse(x.ToString())).ToList();
+
+                    // Ensure all chunks are uploaded
+                    if (uploadedChunkIndices.Count != model.TotalChunks || !uploadedChunkIndices.All(x => x >= 0 && x < model.TotalChunks))
                     {
-                        var chunkStart = chunkIndex * chunkSize;
-                        var chunkEnd = Math.Min((chunkIndex + 1) * chunkSize, (int)file.Length);
-                        var chunkSizeToUpload = chunkEnd - chunkStart;
-
-                        byte[] chunkData = new byte[chunkSizeToUpload];
-                        stream.Seek(chunkStart, SeekOrigin.Begin);
-                        await stream.ReadAsync(chunkData, 0, chunkSizeToUpload);
-
-                        uploadTasks.Add(UploadChunkAsync(blobClient, chunkData, chunkIndex, db, uploadId));
+                        return BadRequest("Not all chunks have been uploaded.");
                     }
 
-                    await Task.WhenAll(uploadTasks);
+                    // Commit all blocks in order
+                    var blockIds = uploadedChunkIndices
+                                   .OrderBy(i => i)
+                                   .Select(i => Convert.ToBase64String(Encoding.UTF8.GetBytes(i.ToString("D6"))))
+                                   .ToList();
+
+                    await blobClient.CommitBlockListAsync(blockIds);
+                    _logger.LogInformation("Finalized blob {BlobName} with {TotalChunks} chunks", blobName, model.TotalChunks);
+
+                    // Save metadata to Cosmos DB
+                    var userPost = new UserPost
+                    {
+                        PostId = Guid.NewGuid().ToString(),
+                        Title = model.FileName,
+                        Content = $"{_cdnBaseUrl}/{blobName}",
+                        Caption = model.Caption,
+                        AuthorId = model.UserId,
+                        AuthorUsername = model.UserName,
+                        DateCreated = DateTime.UtcNow
+                    };
+
+                    await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
+                    _logger.LogInformation("UserPost created for BlobName {BlobName}, PostId {PostId}", blobName, userPost.PostId);
+
+                    // Clean up Redis keys
+                    await _redis.KeyDeleteAsync(uploadKey);
+
+                    return Ok(new
+                    {
+                        Message = "Upload completed successfully.",
+                        BlobUrl = userPost.Content,
+                        PostId = userPost.PostId
+                    });
                 }
 
-                _logger.LogInformation("All chunks uploaded for uploadId: {UploadId}. Finalizing process.", uploadId);
-
-                // Clean up Redis
-                await db.KeyDeleteAsync(uploadLockKey);
-                await db.KeyDeleteAsync($"{uploadId}:totalChunks");
-                await db.KeyDeleteAsync($"{uploadId}:currentChunk");
-
-                // Create UserPost and update Cosmos DB
-                var userPost = new UserPost
-                {
-                    PostId = Guid.NewGuid().ToString(),
-                    Title = file.FileName,
-                    Content = $"{_cdnBaseUrl}/{uniqueBlobName}",
-                    Caption = "Sample Caption",
-                    AuthorId = "SampleUserId",
-                    AuthorUsername = "SampleUserName",
-                    DateCreated = DateTime.UtcNow
-                };
-
-                await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
-                _logger.LogInformation("UserPost created and saved to Cosmos DB for uploadId: {UploadId}", uploadId);
-
-                return Ok(new { Message = "Upload successful", PostId = userPost.PostId });
+                // Intermediate response for chunk upload
+                return Ok(new { Message = "Chunk uploaded successfully.", ChunkIndex = model.ChunkIndex });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during upload for uploadId: {UploadId}", uploadId);
-
-                // Unlock the upload process in case of error
-                var uploadLockKey = $"{uploadId}:lock";
-                await _redis.GetDatabase().KeyDeleteAsync(uploadLockKey);
-
+                _logger.LogError(ex, "Error uploading chunk for UploadId {UploadId}, ChunkIndex {ChunkIndex}", model.UploadId, model.ChunkIndex);
                 return StatusCode(500, "Internal server error.");
             }
         }
-
-        /// <summary>
-        /// Uploads a single chunk asynchronously and updates Redis with the progress.
-        /// </summary>
-        private async Task UploadChunkAsync(BlobClient blobClient, byte[] chunkData, int chunkIndex, IDatabase db, string uploadId)
-        {
-            try
-            {
-                _logger.LogInformation("Uploading chunk {ChunkIndex} for uploadId: {UploadId}", chunkIndex + 1, uploadId);
-                await blobClient.UploadAsync(new BinaryData(chunkData), overwrite: false);
-                _logger.LogInformation("Chunk {ChunkIndex} uploaded successfully for uploadId: {UploadId}", chunkIndex + 1, uploadId);
-
-                // Update Redis with the current chunk progress
-                await db.StringSetAsync($"{uploadId}:currentChunk", chunkIndex + 1);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error uploading chunk {ChunkIndex} for uploadId: {UploadId}", chunkIndex + 1, uploadId);
-                throw;
-            }
-        }
-
 
         [HttpGet("getUserFeeds")]
         public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 10)
         {
             try
             {
-                var m = new BlogHomePageViewModel();
-                var numberOfPosts = 100;
                 var userPosts = new List<UserPost>();
-
-                var queryString = $"SELECT TOP {numberOfPosts} * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC";
+                var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}";
                 var query = _dbContext.FeedsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
+
                 while (query.HasMoreResults)
                 {
                     var response = await query.ReadNextAsync();
-                    var ru = response.RequestCharge;
                     userPosts.AddRange(response.ToList());
                 }
 
-                //if there are no posts in the feedcontainer, go to the posts container.
-                // There may be one that has not propagated to the feed container yet by the azure function (or the azure function is not running).
-                if (!userPosts.Any())
-                {
-                    var queryFromPostsContainter = _dbContext.PostsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
-                    while (queryFromPostsContainter.HasMoreResults)
-                    {
-                        var response = await queryFromPostsContainter.ReadNextAsync();
-                        var ru = response.RequestCharge;
-                        userPosts.AddRange(response.ToList());
-                    }
-                }
-
-                m.BlogPostsMostRecent = userPosts;
-
-                return Ok(m);
+                return Ok(userPosts);
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Error retrieving feeds: {ex.Message}");
+                _logger.LogError(ex, "Error retrieving user feeds.");
+                return StatusCode(500, "Error retrieving feeds.");
             }
         }
 
-        [HttpGet("getChats")]
-        public async Task<IActionResult> getChats(string userId)
-        {
-            try
-            {
-                var userChats = new List<Chats>();
-                var queryString = $"SELECT * FROM f WHERE CONTAINS(f.chatId, 'userId')";
-                queryString = queryString.Replace("userId", userId);
-                var query = _dbContext.ChatsContainer.GetItemQueryIterator<Chats>(new QueryDefinition(queryString));
-                while (query.HasMoreResults)
-                {
-                    var response = await query.ReadNextAsync();
-                    userChats.AddRange(response.ToList());
-                }
+        //[HttpGet("getChats")]
+        //public async Task<IActionResult> getChats(string userId)
+        //{
+        //    try
+        //    {
+        //        var userChats = new List<Chats>();
+        //        var queryString = $"SELECT * FROM f WHERE CONTAINS(f.chatId, '{userId}')";
+        //        var query = _dbContext.ChatsContainer.GetItemQueryIterator<Chats>(new QueryDefinition(queryString));
 
-                List<ChatList> chatList = new List<ChatList>();
-                foreach (var item in userChats)
-                {
-                    string toUserId = item.chatId;
-                    toUserId = toUserId.Replace(userId, "");
-                    toUserId = toUserId.Replace("|", "");
+        //        while (query.HasMoreResults)
+        //        {
+        //            var response = await query.ReadNextAsync();
+        //            userChats.AddRange(response.ToList());
+        //        }
 
-                    IQueryable<BlogUser> queryUsers = _dbContext.UsersContainer.GetItemLinqQueryable<BlogUser>();
+        //        var chatList = new List<ChatList>();
+        //        foreach (var item in userChats)
+        //        {
+        //            var toUserId = item.ChatId.Replace(userId, "").Replace("|", "");
 
-                    if (!string.IsNullOrEmpty(toUserId))
-                    {
-                        queryUsers = queryUsers.Where(x => x.UserId == toUserId);
-                    }
+        //            var user = _dbContext.UsersContainer.GetItemLinqQueryable<BlogUser>()
+        //                          .Where(u => u.UserId == toUserId)
+        //                          .Select(u => new ChatList
+        //                          {
+        //                              toUserId = u.UserId,
+        //                              toUserName = u.Username,
+        //                              toUserProfilePic = u.ProfilePicUrl,
+        //                              chatWindow = item.ChatMessage.Select(m => new ChatWindow
+        //                              {
+        //                                  message = m.Message,
+        //                                  type = m.FromUserId == userId ? "reply" : "sender"
+        //                              }).ToList()
+        //                          })
+        //                          .FirstOrDefault();
 
-                    var resultUser = queryUsers.Select(item => new
-                    {
-                        item.Id,
-                        item.UserId,
-                        item.Username,
-                        item.ProfilePicUrl
-                    }).FirstOrDefault();
+        //            if (user != null)
+        //                chatList.Add(user);
+        //        }
 
-                    if (resultUser != null)
-                    {
-                        ChatList chatList1 = new ChatList();
-                        chatList1.toUserName = resultUser.Username;
-                        chatList1.toUserId = resultUser.UserId;
-                        chatList1.toUserProfilePic = resultUser.ProfilePicUrl;
-
-                        chatList1.chatWindow = new List<ChatWindow>();
-
-                        List<ChatWindow> chatWindows = new List<ChatWindow>();
-                        foreach (var chatMessage in item.chatMessage.Reverse())
-                        {
-                            ChatWindow chatWindow = new ChatWindow();
-                            chatWindow.message = chatMessage.message;
-                            if (chatMessage.fromuserId == userId)
-                            {
-                                chatWindow.type = "reply";
-                            }
-                            else
-                            {
-                                chatWindow.type = "sender";
-                            }
-                            chatWindows.Add(chatWindow);
-                        }
-
-                        chatList1.chatWindow.AddRange(chatWindows);
-
-                        chatList.Add(chatList1);
-                    }
-                }
-
-                return Ok(chatList);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Error retrieving feeds: {ex.Message}");
-            }
-        }
+        //        return Ok(chatList);
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "Error retrieving chats.");
+        //        return StatusCode(500, "Error retrieving chats.");
+        //    }
+        //}
     }
 }

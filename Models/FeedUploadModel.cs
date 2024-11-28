@@ -12,8 +12,7 @@ namespace BackEnd.Models
         public string Description { get; set; } = string.Empty;
 
         [JsonPropertyName("fileName")]
-        public string FileName { get; set; } = string.Empty;
-
+        public string FileName { get; set; } = string.Empty; // User-selected file name
 
         [JsonPropertyName("contentType")]
         public string ContentType { get; set; } = string.Empty;
@@ -22,7 +21,7 @@ namespace BackEnd.Models
         public long FileSize { get; set; }
 
         [JsonPropertyName("file")]
-        public IFormFile File { get; set; } = null!;  // Use IFormFile to handle file upload
+        public IFormFile File { get; set; } = null!; // Use IFormFile to handle file upload
 
         [JsonPropertyName("profilePic")]
         public string ProfilePic { get; set; } = string.Empty;
@@ -32,5 +31,15 @@ namespace BackEnd.Models
 
         [JsonPropertyName("caption")]
         public string Caption { get; set; } = string.Empty;
+
+        // Chunk-specific fields
+        [JsonPropertyName("uploadId")]
+        public string UploadId { get; set; } = string.Empty;
+
+        [JsonPropertyName("chunkIndex")]
+        public int ChunkIndex { get; set; }
+
+        [JsonPropertyName("totalChunks")]
+        public int TotalChunks { get; set; }
     }
 }
