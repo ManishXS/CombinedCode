@@ -45,7 +45,7 @@ namespace BackEnd.Controllers
                     return BadRequest("Chunk is empty.");
                 }
 
-                // Generate Blob Name
+                // Generate a unique blob name
                 var blobName = $"{ShortGuidGenerator.Generate()}_{model.FileName}";
                 var uploadKey = $"{model.UploadId}:chunks";
 
@@ -66,40 +66,26 @@ namespace BackEnd.Controllers
                     _logger.LogInformation("Staged block: {BlockId}", blockId);
                 }
 
-                _logger.LogInformation("Pinging Redis before starting upload...");
-                try
-                {
-                    var pingResult = await _redis.PingAsync();
-                    _logger.LogInformation("Redis ping successful. Response time: {ResponseTime}", pingResult);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Redis ping failed.");
-                    return StatusCode(500, "Redis connection error.");
-                }
                 // Add the chunk to Redis
-                await _redis.SetAddAsync(uploadKey, model.ChunkIndex.ToString());
+                await _redis.SetAddAsync(uploadKey, blockId);
                 _logger.LogInformation("Added chunk {ChunkIndex} to Redis for UploadId {UploadId}", model.ChunkIndex, model.UploadId);
 
-                // If this is the last chunk, finalize the blob
+                // Finalize the blob if all chunks are uploaded
                 if (model.ChunkIndex == model.TotalChunks - 1)
                 {
-                    // Retrieve all uploaded chunks from Redis
-                    var uploadedChunks = await _redis.SetMembersAsync(uploadKey);
-                    var uploadedChunkIndices = uploadedChunks.Select(x => int.Parse(x.ToString())).ToList();
+                    _logger.LogInformation("Finalizing blob upload for UploadId {UploadId}", model.UploadId);
 
-                    // Ensure all chunks are uploaded
-                    if (uploadedChunkIndices.Count != model.TotalChunks || !uploadedChunkIndices.All(x => x >= 0 && x < model.TotalChunks))
+                    // Retrieve all uploaded chunks from Redis
+                    var redisChunks = await _redis.SetMembersAsync(uploadKey);
+                    var blockIds = redisChunks.Select(x => x.ToString()).OrderBy(id => id).ToList();
+
+                    // Validate that all chunks are uploaded
+                    if (blockIds.Count != model.TotalChunks)
                     {
-                        return BadRequest("Not all chunks have been uploaded.");
+                        return BadRequest($"Not all chunks have been uploaded. Expected {model.TotalChunks}, got {blockIds.Count}.");
                     }
 
-                    // Commit all blocks in order
-                    var blockIds = uploadedChunkIndices
-                                   .OrderBy(i => i)
-                                   .Select(i => Convert.ToBase64String(Encoding.UTF8.GetBytes(i.ToString("D6"))))
-                                   .ToList();
-
+                    // Commit the block list
                     await blobClient.CommitBlockListAsync(blockIds);
                     _logger.LogInformation("Finalized blob {BlobName} with {TotalChunks} chunks", blobName, model.TotalChunks);
 
@@ -138,6 +124,8 @@ namespace BackEnd.Controllers
                 return StatusCode(500, "Internal server error.");
             }
         }
+
+
 
         [HttpGet("getUserFeeds")]
         public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 10)
