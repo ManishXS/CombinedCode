@@ -39,9 +39,9 @@ namespace BackEnd
                 // Read configuration values
                 var cosmosDbConnectionString = updatedConfiguration["CosmosDbConnectionString"];
                 var blobConnectionString = updatedConfiguration["BlobConnectionString"];
-                var redisConnectionString = "socialcache.redis.cache.windows.net:6380," +
-                                             "password=" + "06BcFTkdNCGa" + "VoUrUsMy" + "s8p7QD8selIK" +
-                                             "xAzCaCV1qtw=" + ",ssl=True,abortConnect=False"; // Redis connection string split for Git
+                var redisConnectionString = "tenx.redis.cache.windows.net:6380," +
+                                                             "password=" + "Pybgb4IvqXHd" + "SgxpF1pVOb" + "3GnwuAZ1TDj" +
+                                                             "AzCaJuYrJM=" + ",ssl=True,abortConnect=False"; // Updated Redis connection string split for Git
 
                 var apiKey = updatedConfiguration["ApiKey"];
 
