@@ -1,6 +1,7 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using BackEnd.Entities;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Azure.Cosmos;
 using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
@@ -35,6 +36,13 @@ namespace BackEnd
                                .ConfigureKeyVault(kv => kv.SetCredential(new DefaultAzureCredential()));
                     })
                     .Build();
+
+                services.Configure<FormOptions>(options =>
+                {
+                    options.MultipartBodyLengthLimit = 512 * 1024 * 1024; // 512 MB
+                });
+
+
 
                 // Read configuration values
                 var cosmosDbConnectionString = updatedConfiguration["CosmosDbConnectionString"];
