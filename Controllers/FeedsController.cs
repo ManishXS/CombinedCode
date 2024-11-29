@@ -151,52 +151,6 @@ namespace BackEnd.Controllers
             }
         }
 
-        //[HttpGet("getChats")]
-        //public async Task<IActionResult> getChats(string userId)
-        //{
-        //    try
-        //    {
-        //        var userChats = new List<Chats>();
-        //        var queryString = $"SELECT * FROM f WHERE CONTAINS(f.chatId, '{userId}')";
-        //        var query = _dbContext.ChatsContainer.GetItemQueryIterator<Chats>(new QueryDefinition(queryString));
-
-        //        while (query.HasMoreResults)
-        //        {
-        //            var response = await query.ReadNextAsync();
-        //            userChats.AddRange(response.ToList());
-        //        }
-
-        //        var chatList = new List<ChatList>();
-        //        foreach (var item in userChats)
-        //        {
-        //            var toUserId = item.ChatId.Replace(userId, "").Replace("|", "");
-
-        //            var user = _dbContext.UsersContainer.GetItemLinqQueryable<BlogUser>()
-        //                          .Where(u => u.UserId == toUserId)
-        //                          .Select(u => new ChatList
-        //                          {
-        //                              toUserId = u.UserId,
-        //                              toUserName = u.Username,
-        //                              toUserProfilePic = u.ProfilePicUrl,
-        //                              chatWindow = item.ChatMessage.Select(m => new ChatWindow
-        //                              {
-        //                                  message = m.Message,
-        //                                  type = m.FromUserId == userId ? "reply" : "sender"
-        //                              }).ToList()
-        //                          })
-        //                          .FirstOrDefault();
-
-        //            if (user != null)
-        //                chatList.Add(user);
-        //        }
-
-        //        return Ok(chatList);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, "Error retrieving chats.");
-        //        return StatusCode(500, "Error retrieving chats.");
-        //    }
-        //}
+       
     }
 }

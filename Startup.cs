@@ -1,6 +1,7 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using BackEnd.Entities;
+using BackEnd.Services;
 using Microsoft.Azure.Cosmos;
 using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
@@ -102,6 +103,8 @@ namespace BackEnd
                 {
                     c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
                 });
+                // Register BackgroundService
+                services.AddHostedService<BlobUploadBackgroundService>();
             }
             catch (Exception ex)
             {
