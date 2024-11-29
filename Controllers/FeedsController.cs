@@ -125,7 +125,64 @@ namespace BackEnd.Controllers
             }
         }
 
+        [HttpPost("uploadChunk")]
+        public async Task<IActionResult> UploadChunk([FromForm] ChunkUploadModel model)
+        {
+            try
+            {
+                if (model.File == null || string.IsNullOrEmpty(model.UploadId) || model.ChunkIndex < 0 || model.TotalChunks <= 0)
+                {
+                    return BadRequest("Invalid input data.");
+                }
 
+                var uploadKey = $"{model.UploadId}:chunks";
+                var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
+                var blobName = $"{model.UploadId}_{model.FileName}";
+                var blobClient = containerClient.GetBlockBlobClient(blobName);
+
+                using (var stream = model.File.OpenReadStream())
+                {
+                    var blockId = Convert.ToBase64String(Encoding.UTF8.GetBytes(model.ChunkIndex.ToString("D6")));
+                    await blobClient.StageBlockAsync(blockId, stream);
+                    await _redis.SetAddAsync(uploadKey, blockId);
+                }
+
+                if (model.IsLastChunk)
+                {
+                    var redisChunks = await _redis.SetMembersAsync(uploadKey);
+                    var blockIds = redisChunks.Select(x => x.ToString()).OrderBy(id => id).ToList();
+
+                    if (blockIds.Count != model.TotalChunks)
+                    {
+                        return BadRequest("Not all chunks uploaded.");
+                    }
+
+                    await blobClient.CommitBlockListAsync(blockIds);
+                    await _redis.KeyDeleteAsync(uploadKey);
+
+                    var userPost = new UserPost
+                    {
+                        PostId = Guid.NewGuid().ToString(),
+                        Title = model.FileName,
+                        Content = $"{_cdnBaseUrl}/{blobName}",
+                        Caption = model.Caption,
+                        AuthorId = model.UserId,
+                        AuthorUsername = model.UserName,
+                        DateCreated = DateTime.UtcNow
+                    };
+
+                    await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
+                    return Ok(new { Message = "Upload completed successfully.", BlobUrl = userPost.Content });
+                }
+
+                return Ok(new { Message = "Chunk uploaded successfully." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading chunk for UploadId {UploadId}", model.UploadId);
+                return StatusCode(500, "Internal server error.");
+            }
+        }
 
         [HttpGet("getUserFeeds")]
         public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 10)

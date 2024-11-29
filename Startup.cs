@@ -103,8 +103,7 @@ namespace BackEnd
                 {
                     c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
                 });
-                // Register BackgroundService
-                services.AddHostedService<BlobUploadBackgroundService>();
+
             }
             catch (Exception ex)
             {
