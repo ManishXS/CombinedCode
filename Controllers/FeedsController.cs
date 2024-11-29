@@ -1,9 +1,7 @@
 ﻿using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Specialized;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Cosmos;
 using StackExchange.Redis;
-using System.Text;
 using BackEnd.Entities;
 using BackEnd.Models;
 
@@ -20,11 +18,10 @@ namespace BackEnd.Controllers
         private readonly IDatabase _redis;
         private readonly ILogger<FeedsController> _logger;
 
-        public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient, IConnectionMultiplexer redis, ILogger<FeedsController> logger)
+        public FeedsController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient,  ILogger<FeedsController> logger)
         {
             _dbContext = dbContext;
             _blobServiceClient = blobServiceClient;
-            _redis = redis.GetDatabase(); // Correct Redis initialization
             _logger = logger;
         }
 
@@ -33,94 +30,55 @@ namespace BackEnd.Controllers
         {
             try
             {
-                // Validate Input
-                if (model.File == null || string.IsNullOrEmpty(model.UploadId) || model.ChunkIndex < 0 || model.TotalChunks <= 0 || string.IsNullOrEmpty(model.FileName))
+
+                // Ensure required fields are present
+                if (model.File == null || string.IsNullOrEmpty(model.UserId) || string.IsNullOrEmpty(model.FileName))
                 {
-                    return BadRequest("Missing or invalid required fields.");
+                    return BadRequest("Missing required fields.");
                 }
 
-                if (model.File.Length == 0)
-                {
-                    return BadRequest("Chunk is empty.");
-                }
-
-                // Generate a unique blob name
-                var blobName = $"{ShortGuidGenerator.Generate()}_{model.FileName}";
-                var uploadKey = $"{model.UploadId}:chunks";
-
-                // Get Blob container and client
+                // Get Blob container reference
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
-                if (!await containerClient.ExistsAsync())
+
+                // Generate a unique Blob name using a unique value
+                var blobName = $"{ShortGuidGenerator.Generate()}{model.File.FileName}";
+                var blobClient = containerClient.GetBlobClient(blobName);
+
+                await using (var stream = model.File.OpenReadStream())
+                await using (var blobStream = await blobClient.OpenWriteAsync(overwrite: true))
                 {
-                    return NotFound("Blob container does not exist.");
+                    await stream.CopyToAsync(blobStream); // Stream file data in chunks
                 }
 
-                var blobClient = containerClient.GetBlockBlobClient(blobName);
 
-                // Stage the current chunk
-                var blockId = Convert.ToBase64String(Encoding.UTF8.GetBytes(model.ChunkIndex.ToString("D6")));
-                using (var stream = model.File.OpenReadStream())
+                //using (var stream = model.File.OpenReadStream())
+                //{
+                //    await blobClient.UploadAsync(stream);
+                //}
+
+                var blobUrl = blobClient.Uri.ToString();
+
+
+                var userPost = new UserPost
                 {
-                    await blobClient.StageBlockAsync(blockId, stream);
-                    _logger.LogInformation("Staged block: {BlockId}", blockId);
-                }
+                    PostId = Guid.NewGuid().ToString(),
+                    Title = model.ProfilePic,
+                    Content = _cdnBaseUrl + "" + blobName,
+                    Caption = model.Caption,
+                    AuthorId = model.UserId,
+                    AuthorUsername = model.UserName,
+                    DateCreated = DateTime.UtcNow,
+                };
 
-                // Add the chunk to Redis
-                await _redis.SetAddAsync(uploadKey, blockId);
-                _logger.LogInformation("Added chunk {ChunkIndex} to Redis for UploadId {UploadId}", model.ChunkIndex, model.UploadId);
+                //Insert the new blog post into the database.
+                await _dbContext.PostsContainer.UpsertItemAsync<UserPost>(userPost, new PartitionKey(userPost.PostId));
 
-                // Finalize the blob if all chunks are uploaded
-                if (model.ChunkIndex == model.TotalChunks - 1)
-                {
-                    _logger.LogInformation("Finalizing blob upload for UploadId {UploadId}", model.UploadId);
 
-                    // Retrieve all uploaded chunks from Redis
-                    var redisChunks = await _redis.SetMembersAsync(uploadKey);
-                    var blockIds = redisChunks.Select(x => x.ToString()).OrderBy(id => id).ToList();
-
-                    // Validate that all chunks are uploaded
-                    if (blockIds.Count != model.TotalChunks)
-                    {
-                        return BadRequest($"Not all chunks have been uploaded. Expected {model.TotalChunks}, got {blockIds.Count}.");
-                    }
-
-                    // Commit the block list
-                    await blobClient.CommitBlockListAsync(blockIds);
-                    _logger.LogInformation("Finalized blob {BlobName} with {TotalChunks} chunks", blobName, model.TotalChunks);
-
-                    // Save metadata to Cosmos DB
-                    var userPost = new UserPost
-                    {
-                        PostId = Guid.NewGuid().ToString(),
-                        Title = model.FileName,
-                        Content = $"{_cdnBaseUrl}/{blobName}",
-                        Caption = model.Caption,
-                        AuthorId = model.UserId,
-                        AuthorUsername = model.UserName,
-                        DateCreated = DateTime.UtcNow
-                    };
-
-                    await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
-                    _logger.LogInformation("UserPost created for BlobName {BlobName}, PostId {PostId}", blobName, userPost.PostId);
-
-                    // Clean up Redis keys
-                    await _redis.KeyDeleteAsync(uploadKey);
-
-                    return Ok(new
-                    {
-                        Message = "Upload completed successfully.",
-                        BlobUrl = userPost.Content,
-                        PostId = userPost.PostId
-                    });
-                }
-
-                // Intermediate response for chunk upload
-                return Ok(new { Message = "Chunk uploaded successfully.", ChunkIndex = model.ChunkIndex });
+                return Ok(new { Message = "Feed uploaded successfully.", FeedId = userPost.PostId });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error uploading chunk for UploadId {UploadId}, ChunkIndex {ChunkIndex}", model.UploadId, model.ChunkIndex);
-                return StatusCode(500, "Internal server error.");
+                return StatusCode(500, $"Error uploading feed: {ex.Message}");
             }
         }
 

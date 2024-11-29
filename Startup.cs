@@ -47,16 +47,13 @@ namespace BackEnd
                 // Read configuration values
                 var cosmosDbConnectionString = updatedConfiguration["CosmosDbConnectionString"];
                 var blobConnectionString = updatedConfiguration["BlobConnectionString"];
-                var redisConnectionString = "tenx.redis.cache.windows.net:6380," +
-                                                             "password=" + "Pybgb4IvqXHd" + "SgxpF1pVOb" + "3GnwuAZ1TDj" +
-                                                             "AzCaJuYrJM=" + ",ssl=True,abortConnect=False"; // Updated Redis connection string split for Git
+            
 
                 var apiKey = updatedConfiguration["ApiKey"];
 
                 // Validate required configurations
                 if (string.IsNullOrEmpty(cosmosDbConnectionString) ||
                     string.IsNullOrEmpty(blobConnectionString) ||
-                    string.IsNullOrEmpty(redisConnectionString) ||
                     string.IsNullOrEmpty(apiKey))
                 {
                     throw new Exception("Required configuration is missing. Check CosmosDbConnectionString, BlobConnectionString, RedisConnectionString, and ApiKey.");
@@ -76,14 +73,6 @@ namespace BackEnd
                 // Blob Service Client
                 services.AddSingleton(x => new BlobServiceClient(blobConnectionString));
 
-                // Redis Connection
-                // Redis Connection
-                services.AddSingleton<IConnectionMultiplexer>(sp =>
-                {
-                    var configuration = ConfigurationOptions.Parse(redisConnectionString, true);
-                    configuration.Ssl = true; // Ensure SSL is enabled for secure communication
-                    return ConnectionMultiplexer.Connect(configuration);
-                });
 
 
                 // Inject updated configuration
