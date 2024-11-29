@@ -1,7 +1,6 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using BackEnd.Entities;
-using BackEnd.Services;
 using Microsoft.Azure.Cosmos;
 using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
