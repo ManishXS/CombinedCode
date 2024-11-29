@@ -4,6 +4,7 @@ using Microsoft.Azure.Cosmos;
 using StackExchange.Redis;
 using BackEnd.Entities;
 using BackEnd.Models;
+using BackEnd.ViewModels;
 
 namespace BackEnd.Controllers
 {
@@ -87,23 +88,42 @@ namespace BackEnd.Controllers
         {
             try
             {
-                var userPosts = new List<UserPost>();
-                var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}";
-                var query = _dbContext.FeedsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
 
+                var m = new BlogHomePageViewModel();
+                var numberOfPosts = 100;
+                var userPosts = new List<UserPost>();
+
+                var queryString = $"SELECT TOP {numberOfPosts} * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC";
+                var query = _dbContext.FeedsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
                 while (query.HasMoreResults)
                 {
                     var response = await query.ReadNextAsync();
+                    var ru = response.RequestCharge;
                     userPosts.AddRange(response.ToList());
                 }
 
-                return Ok(userPosts);
+                //if there are no posts in the feedcontainer, go to the posts container.
+                // There may be one that has not propagated to the feed container yet by the azure function (or the azure function is not running).
+                if (!userPosts.Any())
+                {
+                    var queryFromPostsContainter = _dbContext.PostsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
+                    while (queryFromPostsContainter.HasMoreResults)
+                    {
+                        var response = await queryFromPostsContainter.ReadNextAsync();
+                        var ru = response.RequestCharge;
+                        userPosts.AddRange(response.ToList());
+                    }
+                }
+
+                m.BlogPostsMostRecent = userPosts;
+
+                return Ok(m);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving user feeds.");
-                return StatusCode(500, "Error retrieving feeds.");
+                return StatusCode(500, $"Error retrieving feeds: {ex.Message}");
             }
         }
+
     }
 }
