@@ -84,46 +84,38 @@ namespace BackEnd.Controllers
         }
 
         [HttpGet("getUserFeeds")]
-        public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 10)
+        public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 2) // Default pageSize set to 2
         {
             try
             {
-
-                var m = new BlogHomePageViewModel();
-                var numberOfPosts = 100;
                 var userPosts = new List<UserPost>();
+                var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}"; // Pagination logic
 
-                var queryString = $"SELECT TOP {numberOfPosts} * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC";
                 var query = _dbContext.FeedsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
                 while (query.HasMoreResults)
                 {
                     var response = await query.ReadNextAsync();
-                    var ru = response.RequestCharge;
                     userPosts.AddRange(response.ToList());
                 }
 
-                //if there are no posts in the feedcontainer, go to the posts container.
-                // There may be one that has not propagated to the feed container yet by the azure function (or the azure function is not running).
-                if (!userPosts.Any())
+                if (!userPosts.Any()) // Fallback to PostsContainer if FeedsContainer is empty
                 {
-                    var queryFromPostsContainter = _dbContext.PostsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
-                    while (queryFromPostsContainter.HasMoreResults)
+                    var queryFromPostsContainer = _dbContext.PostsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
+                    while (queryFromPostsContainer.HasMoreResults)
                     {
-                        var response = await queryFromPostsContainter.ReadNextAsync();
-                        var ru = response.RequestCharge;
+                        var response = await queryFromPostsContainer.ReadNextAsync();
                         userPosts.AddRange(response.ToList());
                     }
                 }
 
-                m.BlogPostsMostRecent = userPosts;
-
-                return Ok(m);
+                return Ok(new { BlogPostsMostRecent = userPosts }); // Returning paginated data
             }
             catch (Exception ex)
             {
                 return StatusCode(500, $"Error retrieving feeds: {ex.Message}");
             }
         }
+
 
     }
 }
