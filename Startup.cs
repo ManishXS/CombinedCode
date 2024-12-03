@@ -145,6 +145,8 @@ namespace BackEnd
                 {
                     endpoints.MapControllers();
                     endpoints.MapHub<ChatHub>("/chatHub");
+                    endpoints.MapFallbackToFile("index.html");
+
                 });
 
                 logger.LogInformation("Application configured successfully.");
