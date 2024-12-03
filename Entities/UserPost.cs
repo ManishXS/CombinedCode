@@ -59,6 +59,9 @@ namespace BackEnd.Entities
         [JsonProperty(PropertyName = "dateCreated")]
         public DateTime DateCreated { get; set; }
 
+        [JsonProperty(PropertyName = "likeFlag")]
+        public int LikeFlag { get; set; }
+
 
         public override string ToString()
         {

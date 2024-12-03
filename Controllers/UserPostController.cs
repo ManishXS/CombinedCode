@@ -230,6 +230,12 @@ namespace BackEnd.Controllers
                     //ChatHub chatHub = new ChatHub(_dbContext);
                     //chatHub.SendBellCount(bp.AuthorId, "1");
                 }
+                else
+                {
+                    var userId = model.LikeAuthorId;
+                    var obj = new dynamic[] { model.PostId, userId };
+                    var result = await _dbContext.PostsContainer.Scripts.ExecuteStoredProcedureAsync<string>("deleteLike", new PartitionKey(model.PostId), obj);
+                }
             }
 
             return Ok(new { postId = model.PostId });

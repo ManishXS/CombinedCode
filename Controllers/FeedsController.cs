@@ -91,21 +91,37 @@ namespace BackEnd.Controllers
                 var userPosts = new List<UserPost>();
                 var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}"; // Pagination logic
 
-                var query = _dbContext.FeedsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
-                while (query.HasMoreResults)
-                {
-                    var response = await query.ReadNextAsync();
-                    userPosts.AddRange(response.ToList());
-                }
 
-                if (!userPosts.Any()) // Fallback to PostsContainer if FeedsContainer is empty
-                {
                     var queryFromPostsContainer = _dbContext.PostsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
                     while (queryFromPostsContainer.HasMoreResults)
                     {
                         var response = await queryFromPostsContainer.ReadNextAsync();
                         userPosts.AddRange(response.ToList());
                     }
+
+                if (!string.IsNullOrEmpty(userId))
+                {
+                    var userLikes = new List<UserPost>();
+                    foreach (var item in userPosts)
+                    {
+                        userLikes = new List<UserPost>();
+
+                        var queryString_likes = $"SELECT  * FROM f WHERE f.type='like' and f.postId='pid' and f.userId='uid'";
+                        queryString_likes = queryString_likes.Replace("uid", userId);
+                        queryString_likes = queryString_likes.Replace("pid", item.PostId);
+                        var queryFromPostsContainter_likes = _dbContext.PostsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString_likes));
+                        while (queryFromPostsContainter_likes.HasMoreResults)
+                        {
+                            var response = await queryFromPostsContainter_likes.ReadNextAsync();
+                            var ru = response.RequestCharge;
+                            userLikes.AddRange(response.ToList());
+                        }
+                        if (userLikes.Count > 0)
+                        {
+                            item.LikeFlag = 1;
+                        }
+                    }
+                 
                 }
 
                 return Ok(new { BlogPostsMostRecent = userPosts }); // Returning paginated data
