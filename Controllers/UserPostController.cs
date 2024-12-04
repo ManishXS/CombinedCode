@@ -186,60 +186,55 @@ namespace BackEnd.Controllers
         [HttpPost]
         public async Task<IActionResult> PostLike([FromForm] LikePost model)
         {
-
-            ItemResponse<UserPost> response = await _dbContext.PostsContainer.ReadItemAsync<UserPost>(model.PostId, new PartitionKey(model.PostId));
-            var ru = response.RequestCharge;
-            var bp = response.Resource;
-
-            if (bp != null)
+            try
             {
-                //Check that this user has not already liked this post
-                var queryString = $"SELECT TOP 1 * FROM p WHERE p.type='like' AND p.postId = @PostId AND p.userId = @UserId ORDER BY p.dateCreated DESC";
+                var response = await _dbContext.PostsContainer.ReadItemAsync<UserPost>(model.PostId, new PartitionKey(model.PostId));
+                var post = response.Resource;
 
-                var queryDef = new QueryDefinition(queryString);
-                queryDef.WithParameter("@PostId", model.PostId);
-                queryDef.WithParameter("@UserId", model.LikeAuthorId);
-                var query = _dbContext.PostsContainer.GetItemQueryIterator<UserPostLike>(queryDef);
-
-                UserPostLike like = null;
-                if (query.HasMoreResults)
+                if (post != null)
                 {
-                    var response1 = await query.ReadNextAsync();
-                    var ru1 = response1.RequestCharge;
-                    like = response1.FirstOrDefault();
-                }
+                    var queryString = "SELECT TOP 1 * FROM p WHERE p.type='like' AND p.postId = @PostId AND p.userId = @UserId";
+                    var queryDef = new QueryDefinition(queryString)
+                        .WithParameter("@PostId", model.PostId)
+                        .WithParameter("@UserId", model.LikeAuthorId);
 
+                    var query = _dbContext.PostsContainer.GetItemQueryIterator<UserPostLike>(queryDef);
+                    var existingLike = (await query.ReadNextAsync()).FirstOrDefault();
 
-                if (like == null)
-                {
-                    var userPostLike = new UserPostLike
+                    if (existingLike == null)
                     {
-                        LikeId = Guid.NewGuid().ToString(),
-                        PostId = model.PostId,
+                        var like = new UserPostLike
+                        {
+                            LikeId = Guid.NewGuid().ToString(),
+                            PostId = model.PostId,
+                            LikeAuthorId = model.LikeAuthorId,
+                            LikeAuthorUsername = model.LikeAuthorUsername,
+                            LikeDateCreated = DateTime.UtcNow,
+                            UserProfileUrl = model.UserProfileUrl
+                        };
 
-                        LikeAuthorId = model.LikeAuthorId,
-                        LikeAuthorUsername = model.LikeAuthorUsername,
-                        LikeDateCreated = DateTime.UtcNow,
-                        UserProfileUrl = model.UserProfileUrl,
-                    };
+                        await _dbContext.PostsContainer.UpsertItemAsync(like, new PartitionKey(model.PostId));
+                        post.LikeCount++;
+                    }
+                    else
+                    {
+                        await _dbContext.PostsContainer.DeleteItemAsync<UserPostLike>(existingLike.LikeId, new PartitionKey(model.PostId));
+                        post.LikeCount--;
+                    }
 
-                    var obj = new dynamic[] { userPostLike.PostId, userPostLike };
-
-                    var result = await _dbContext.PostsContainer.Scripts.ExecuteStoredProcedureAsync<string>("createLike", new PartitionKey(userPostLike.PostId), obj);
-
-                    //ChatHub chatHub = new ChatHub(_dbContext);
-                    //chatHub.SendBellCount(bp.AuthorId, "1");
+                    await _dbContext.PostsContainer.UpsertItemAsync(post, new PartitionKey(post.PostId));
+                    return Ok(new { likeCount = post.LikeCount });
                 }
-                else
-                {
-                    var userId = model.LikeAuthorId;
-                    var obj = new dynamic[] { model.PostId, userId };
-                    var result = await _dbContext.PostsContainer.Scripts.ExecuteStoredProcedureAsync<string>("deleteLike", new PartitionKey(model.PostId), obj);
-                }
+
+                return NotFound("Post not found.");
             }
-
-            return Ok(new { postId = model.PostId });
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error toggling like: {ex.Message}");
+                return StatusCode(500, "An error occurred while processing the like request.");
+            }
         }
+
 
         [Route("post/{postId}/unlike")]
         [HttpPost]
