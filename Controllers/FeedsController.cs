@@ -106,8 +106,8 @@ namespace BackEnd.Controllers
                     {
                         userLikes = new List<UserPost>();
 
-                        // var queryString_likes = $"SELECT  * FROM f WHERE f.type='like' and f.postId='pid' and f.userId='uid'";
-                        var queryString_likes = $"SELECT * FROM f WHERE f.type='post' ORDER BY (f.likeCount * 2 + f.commentCount * 1.5) DESC, f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}";
+                       var queryString_likes = $"SELECT  * FROM f WHERE f.type='like' and f.postId='pid' and f.userId='uid'";
+                      // var queryString_likes = $"SELECT * FROM f WHERE f.type='post' ORDER BY (f.likeCount * 2 + f.commentCount * 1.5) DESC, f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}";
 
                         queryString_likes = queryString_likes.Replace("uid", userId);
                         queryString_likes = queryString_likes.Replace("pid", item.PostId);
