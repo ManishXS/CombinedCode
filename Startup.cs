@@ -78,19 +78,19 @@ namespace BackEnd
                 // Inject updated configuration
                 services.AddSingleton<IConfiguration>(updatedConfiguration);
 
-                // CORS Configuration
-                //services.AddCors(options =>
-                //{
-                //    options.AddPolicy("AllowSpecific", builder =>
-                //    {
-                //        builder.WithOrigins("https://tenxso.com")
-                //               .AllowAnyHeader()
-                //               .AllowAnyMethod()
-                //               .AllowCredentials();
-                //    });
+                //CORS Configuration
+                services.AddCors(options =>
+                {
+                    options.AddPolicy("AllowSpecific", builder =>
+                    {
+                        builder.WithOrigins("https://tenxso.com")
+                               .AllowAnyHeader()
+                               .AllowAnyMethod()
+                               .AllowCredentials();
+                    });
 
 
-                //});
+                });
 
                 // SignalR for real-time communication
                 services.AddSignalR();
@@ -143,12 +143,6 @@ namespace BackEnd
 
                 // Authorization and Endpoints
                 app.UseAuthorization();
-                app.UseCors(builder => builder
-                        .AllowAnyHeader()
-                        .AllowAnyMethod()
-                        .SetIsOriginAllowed((host) => true)
-                        .AllowCredentials());
-
 
 
                 app.UseEndpoints(endpoints =>
