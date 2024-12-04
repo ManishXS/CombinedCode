@@ -1,8 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using BackEnd.Entities;
 using Microsoft.Azure.Cosmos;
-using System.Resources;
-using System.Reflection;
 using Azure.Storage.Blobs;
 using BackEnd.Models;
 using System.Collections;
@@ -19,9 +17,6 @@ namespace BackEnd.Controllers
         private readonly BlobServiceClient _blobServiceClient;
         private static readonly Random _random = new Random();
         private readonly string _profileContainer = "profilepic";  // Blob container for storing profile pictures
-
-        // Base URL for the profile pictures served via CDN
-        private static readonly string _cdnBaseUrl = "https://tenxcdn.azureedge.net/profilepic/";
 
         public UsersController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient)
         {
@@ -47,7 +42,7 @@ namespace BackEnd.Controllers
                         await blobClient.UploadAsync(stream, overwrite: true);
                     }
 
-                    updatedPicURL = blobClient.Uri.ToString();
+                    updatedPicURL = blobClient.Uri.ToString(); // Direct Blob Storage URL
                 }
 
                 var itemToUpdate = new BlogUser
@@ -118,7 +113,7 @@ namespace BackEnd.Controllers
                 {
                     UserId = ShortGuidGenerator.Generate(),
                     Username = GenerateRandomName(),
-                    ProfilePicUrl = GetRandomProfilePic()
+                    ProfilePicUrl = GetRandomProfilePic() // Updated for Blob Storage URLs
                 };
 
                 try
@@ -150,61 +145,14 @@ namespace BackEnd.Controllers
 
         private string GenerateRandomName()
         {
-            string adjective = GetRandomResource("Adj_");
-            string noun = GetRandomResource("Noun_");
-
-            bool isAdjectiveFrench = _random.Next(2) == 0;
-
-            string finalAdjective = isAdjectiveFrench ? GetFrenchPart(adjective) : GetEnglishPart(adjective);
-            string finalNoun = isAdjectiveFrench ? GetEnglishPart(noun) : GetFrenchPart(noun);
-
-            return $"{finalAdjective}_{finalNoun}";
+            return $"User_{_random.Next(1000, 9999)}";
         }
 
         private string GetRandomProfilePic()
         {
             int randomNumber = _random.Next(1, 26); // Generate a random number between 1 and 25
-            return $"{_cdnBaseUrl}pp{randomNumber}.jpg";
-        }
-
-        private string GetRandomResource(string resourceType)
-        {
-            ResourceManager resourceManager = new ResourceManager("BackEnd.Resources.AdjectivesNouns", Assembly.GetExecutingAssembly());
-            var resourceSet = resourceManager.GetResourceSet(System.Globalization.CultureInfo.CurrentUICulture, true, true);
-
-            if (resourceSet == null)
-            {
-                throw new Exception("ResourceSet is null. Resource file might not be found.");
-            }
-
-            var matchingEntries = new List<DictionaryEntry>();
-            foreach (DictionaryEntry entry in resourceSet)
-            {
-                if (entry.Key.ToString().StartsWith(resourceType))
-                {
-                    matchingEntries.Add(entry);
-                }
-            }
-
-            if (matchingEntries.Count == 0)
-            {
-                throw new Exception($"No matching {resourceType} resources found.");
-            }
-
-            DictionaryEntry selectedEntry = matchingEntries[_random.Next(matchingEntries.Count)];
-            return $"{selectedEntry.Key}-{selectedEntry.Value}";
-        }
-
-        private string GetFrenchPart(string entry)
-        {
-            var parts = entry?.Split('-');
-            return parts?[0].Split('_')[1];
-        }
-
-        private string GetEnglishPart(string entry)
-        {
-            var parts = entry?.Split('-');
-            return parts?[1];
+            var containerClient = _blobServiceClient.GetBlobContainerClient(_profileContainer);
+            return $"{containerClient.Uri}/pp{randomNumber}.jpg"; // Blob Storage URL
         }
     }
 }
