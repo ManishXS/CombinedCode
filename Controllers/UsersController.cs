@@ -5,6 +5,8 @@ using Azure.Storage.Blobs;
 using BackEnd.Models;
 using System.Collections;
 using System.Net;
+using System.Resources;
+using System.Reflection;
 using BackEnd.Shared;
 
 namespace BackEnd.Controllers
@@ -145,7 +147,15 @@ namespace BackEnd.Controllers
 
         private string GenerateRandomName()
         {
-            return $"User_{_random.Next(1000, 9999)}";
+            string adjective = GetRandomResource("Adj_");
+            string noun = GetRandomResource("Noun_");
+
+            bool isAdjectiveFrench = _random.Next(2) == 0;
+
+            string finalAdjective = isAdjectiveFrench ? GetFrenchPart(adjective) : GetEnglishPart(adjective);
+            string finalNoun = isAdjectiveFrench ? GetEnglishPart(noun) : GetFrenchPart(noun);
+
+            return $"{finalAdjective}_{finalNoun}";
         }
 
         private string GetRandomProfilePic()
@@ -153,6 +163,46 @@ namespace BackEnd.Controllers
             int randomNumber = _random.Next(1, 26); // Generate a random number between 1 and 25
             var containerClient = _blobServiceClient.GetBlobContainerClient(_profileContainer);
             return $"{containerClient.Uri}/pp{randomNumber}.jpg"; // Blob Storage URL
+        }
+
+        private string GetRandomResource(string resourceType)
+        {
+            ResourceManager resourceManager = new ResourceManager("BackEnd.Resources.AdjectivesNouns", Assembly.GetExecutingAssembly());
+            var resourceSet = resourceManager.GetResourceSet(System.Globalization.CultureInfo.CurrentUICulture, true, true);
+
+            if (resourceSet == null)
+            {
+                throw new Exception("ResourceSet is null. Resource file might not be found.");
+            }
+
+            var matchingEntries = new List<DictionaryEntry>();
+            foreach (DictionaryEntry entry in resourceSet)
+            {
+                if (entry.Key.ToString().StartsWith(resourceType))
+                {
+                    matchingEntries.Add(entry);
+                }
+            }
+
+            if (matchingEntries.Count == 0)
+            {
+                throw new Exception($"No matching {resourceType} resources found.");
+            }
+
+            DictionaryEntry selectedEntry = matchingEntries[_random.Next(matchingEntries.Count)];
+            return $"{selectedEntry.Key}-{selectedEntry.Value}";
+        }
+
+        private string GetFrenchPart(string entry)
+        {
+            var parts = entry?.Split('-');
+            return parts?[0].Split('_')[1];
+        }
+
+        private string GetEnglishPart(string entry)
+        {
+            var parts = entry?.Split('-');
+            return parts?[1];
         }
     }
 }
