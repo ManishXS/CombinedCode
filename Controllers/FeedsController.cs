@@ -87,7 +87,7 @@ namespace BackEnd.Controllers
                     PostId = Guid.NewGuid().ToString(),
                     Title = model.ProfilePic,
                     Content = $"{_cdnBaseUrl}{blobName}",
-                    Caption = model.Caption,
+                    Caption = string.IsNullOrEmpty(model.Caption) ? string.Empty : model.Caption,
                     AuthorId = model.UserId,
                     AuthorUsername = model.UserName,
                     DateCreated = DateTime.UtcNow,
