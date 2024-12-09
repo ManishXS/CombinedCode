@@ -31,15 +31,5 @@ namespace BackEnd.Models
 
         [JsonPropertyName("caption")]
         public string Caption { get; set; } = string.Empty;
-
-        // Chunk-specific fields
-        [JsonPropertyName("uploadId")]
-        public string UploadId { get; set; } = string.Empty;
-
-        [JsonPropertyName("chunkIndex")]
-        public int ChunkIndex { get; set; }
-
-        [JsonPropertyName("totalChunks")]
-        public int TotalChunks { get; set; }
     }
 }

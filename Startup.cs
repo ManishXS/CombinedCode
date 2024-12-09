@@ -62,7 +62,7 @@ namespace BackEnd
                 // Optional: Increase multipart request size limit (for local development/self-hosted)
                 services.Configure<FormOptions>(options =>
                 {
-                    options.MultipartBodyLengthLimit = 104857600; // 100 MB limit
+                    options.MultipartBodyLengthLimit = 209715200; // 200 MB limit
                 });
 
                 // CORS configuration
