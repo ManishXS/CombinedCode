@@ -4,7 +4,7 @@ using Microsoft.Azure.Cosmos;
 using StackExchange.Redis;
 using BackEnd.Entities;
 using BackEnd.Models;
-using BackEnd.ViewModels;
+using System.Security.Cryptography;
 
 namespace BackEnd.Controllers
 {
@@ -27,63 +27,98 @@ namespace BackEnd.Controllers
         }
 
         [HttpPost("uploadFeed")]
-        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model)
+        public async Task<IActionResult> UploadFeed([FromForm] FeedUploadModel model, CancellationToken cancellationToken)
         {
+            Console.WriteLine("Starting UploadFeed API...");
+
             try
             {
-
-                // Ensure required fields are present
+                // Validate required fields
                 if (model.File == null || string.IsNullOrEmpty(model.UserId) || string.IsNullOrEmpty(model.FileName))
                 {
+                    Console.WriteLine("Validation failed: Missing required fields.");
                     return BadRequest("Missing required fields.");
                 }
 
+                Console.WriteLine($"Received file: {model.File.FileName}, Size: {model.File.Length} bytes");
+                Console.WriteLine($"User ID: {model.UserId}, User Name: {model.UserName}");
+
                 // Get Blob container reference
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
+                Console.WriteLine($"Connecting to Blob Container: {_feedContainer}");
 
-                // Generate a unique Blob name using a unique value
-                var blobName = $"{ShortGuidGenerator.Generate()}{model.File.FileName}";
+                // Generate a unique Blob name
+                var blobName = $"{Guid.NewGuid()}_{Path.GetFileName(model.File.FileName)}";
                 var blobClient = containerClient.GetBlobClient(blobName);
+                Console.WriteLine($"Generated Blob Name: {blobName}");
 
-                await using (var stream = model.File.OpenReadStream())
-                await using (var blobStream = await blobClient.OpenWriteAsync(overwrite: true))
+                // Upload the file to Azure Blob Storage with buffering and CRC32 checksum verification
+                const int BufferSize = 4 * 1024 * 1024; // 4 MB buffer size
+                using var crc32 = new Crc32();
+
+                await using var fileStream = model.File.OpenReadStream();
+                await using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: cancellationToken);
+
+                byte[] buffer = new byte[BufferSize];
+                int bytesRead;
+                long totalBytesUploaded = 0;
+
+                Console.WriteLine("Starting file upload...");
+
+                while ((bytesRead = await fileStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
                 {
-                    await stream.CopyToAsync(blobStream); // Stream file data in chunks
+                    await blobStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                    crc32.TransformBlock(buffer, 0, bytesRead, buffer, 0);
+                    totalBytesUploaded += bytesRead;
+
+                    Console.WriteLine($"Uploaded {totalBytesUploaded} bytes so far...");
                 }
 
-
-                //using (var stream = model.File.OpenReadStream())
-                //{
-                //    await blobClient.UploadAsync(stream);
-                //}
+                crc32.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                var checksum = BitConverter.ToString(crc32.Hash).Replace("-", "").ToLowerInvariant();
+                Console.WriteLine($"File upload completed. CRC32 Checksum: {checksum}");
 
                 var blobUrl = blobClient.Uri.ToString();
+                Console.WriteLine($"Blob URL: {blobUrl}");
 
-
+                // Create the user post record
                 var userPost = new UserPost
                 {
                     PostId = Guid.NewGuid().ToString(),
                     Title = model.ProfilePic,
-                    Content = _cdnBaseUrl + "" + blobName,
+                    Content = $"{_cdnBaseUrl}{blobName}",
                     Caption = model.Caption,
                     AuthorId = model.UserId,
                     AuthorUsername = model.UserName,
                     DateCreated = DateTime.UtcNow,
+                    Checksum = checksum
                 };
 
-                //Insert the new blog post into the database.
-                await _dbContext.PostsContainer.UpsertItemAsync<UserPost>(userPost, new PartitionKey(userPost.PostId));
+                // Insert the user post into the Cosmos DB database
+                await _dbContext.PostsContainer.UpsertItemAsync(userPost, new PartitionKey(userPost.PostId));
+                Console.WriteLine("User post successfully saved to Cosmos DB.");
 
-
-                return Ok(new { Message = "Feed uploaded successfully.", FeedId = userPost.PostId });
+                return Ok(new
+                {
+                    Message = "Feed uploaded successfully.",
+                    FeedId = userPost.PostId,
+                    Checksum = checksum
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Upload was canceled by the client or due to timeout.");
+                return StatusCode(499, "Upload was canceled due to timeout or client cancellation.");
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"Error during upload: {ex.Message}");
                 return StatusCode(500, $"Error uploading feed: {ex.Message}");
             }
         }
 
-        [HttpGet("getUserFeeds")]
+
+    [HttpGet("getUserFeeds")]
         public async Task<IActionResult> GetUserFeeds(string? userId = null, int pageNumber = 1, int pageSize = 2) // Default pageSize set to 2
         {
             try
@@ -135,5 +170,55 @@ namespace BackEnd.Controllers
         }
 
 
+    }
+
+    // CRC32 checksum implementation
+    public class Crc32 : HashAlgorithm
+    {
+        private const uint Polynomial = 0xedb88320;
+        private readonly uint[] table = new uint[256];
+        private uint crc = 0xffffffff;
+
+        public Crc32()
+        {
+            InitializeTable();
+            HashSizeValue = 32;
+        }
+
+        private void InitializeTable()
+        {
+            for (uint i = 0; i < 256; i++)
+            {
+                uint entry = i;
+                for (int j = 0; j < 8; j++)
+                {
+                    if ((entry & 1) == 1)
+                        entry = (entry >> 1) ^ Polynomial;
+                    else
+                        entry >>= 1;
+                }
+                table[i] = entry;
+            }
+        }
+
+        public override void Initialize()
+        {
+            crc = 0xffffffff;
+        }
+
+        protected override void HashCore(byte[] array, int ibStart, int cbSize)
+        {
+            for (int i = ibStart; i < ibStart + cbSize; i++)
+            {
+                byte index = (byte)(crc ^ array[i]);
+                crc = (crc >> 8) ^ table[index];
+            }
+        }
+
+        protected override byte[] HashFinal()
+        {
+            crc ^= 0xffffffff;
+            return BitConverter.GetBytes(crc);
+        }
     }
 }

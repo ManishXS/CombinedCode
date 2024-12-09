@@ -1,10 +1,8 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using BackEnd.Entities;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Azure.Cosmos;
-using Microsoft.OpenApi.Models;
-using StackExchange.Redis;
+using Microsoft.AspNetCore.Http.Features; // Added for FormOptions
 
 namespace BackEnd
 {
@@ -23,7 +21,6 @@ namespace BackEnd
             {
                 Console.WriteLine("Starting ConfigureServices...");
 
-                // Azure App Configuration
                 var appConfigConnectionString = "Endpoint=https://azurermtenx.azconfig.io;" +
                                                 "Id=8FPB;" +
                                                 "Secret=3NCoPOSo0Y1ykrX6ih9ObYVbY2ZA6RLqaXyMyBI04eB5k4wkhpA5JQQJ99AKACGhslBY0DYHAAACAZAC1woJ";
@@ -37,29 +34,16 @@ namespace BackEnd
                     })
                     .Build();
 
-                services.Configure<FormOptions>(options =>
-                {
-                    options.MultipartBodyLengthLimit = 512 * 1024 * 1024; // 512 MB
-                });
-
-
-
-                // Read configuration values
                 var cosmosDbConnectionString = updatedConfiguration["CosmosDbConnectionString"];
                 var blobConnectionString = updatedConfiguration["BlobConnectionString"];
-            
-
                 var apiKey = updatedConfiguration["ApiKey"];
 
-                // Validate required configurations
-                if (string.IsNullOrEmpty(cosmosDbConnectionString) ||
-                    string.IsNullOrEmpty(blobConnectionString) ||
-                    string.IsNullOrEmpty(apiKey))
+                if (string.IsNullOrEmpty(cosmosDbConnectionString) || string.IsNullOrEmpty(blobConnectionString) || string.IsNullOrEmpty(apiKey))
                 {
-                    throw new Exception("Required configuration is missing. Check CosmosDbConnectionString, BlobConnectionString, RedisConnectionString, and ApiKey.");
+                    throw new Exception("Required configuration is missing. Check CosmosDbConnectionString, BlobConnectionString, and ApiKey.");
                 }
 
-                // Cosmos DB Client
+                // Cosmos DB configuration
                 CosmosClientOptions clientOptions = new CosmosClientOptions
                 {
                     ConnectionMode = ConnectionMode.Direct,
@@ -70,37 +54,31 @@ namespace BackEnd
                 services.AddSingleton(cosmosClient);
                 services.AddScoped<CosmosDbContext>();
 
-                // Blob Service Client
+                // Blob Service configuration
                 services.AddSingleton(x => new BlobServiceClient(blobConnectionString));
 
-
-
-                // Inject updated configuration
                 services.AddSingleton<IConfiguration>(updatedConfiguration);
 
-                //CORS Configuration
+                // Optional: Increase multipart request size limit (for local development/self-hosted)
+                services.Configure<FormOptions>(options =>
+                {
+                    options.MultipartBodyLengthLimit = 104857600; // 100 MB limit
+                });
+
+                // CORS configuration
                 services.AddCors(options =>
                 {
-                    options.AddPolicy("AllowSpecific", builder =>
+                    options.AddPolicy("AllowAll", builder =>
                     {
-                        builder.WithOrigins("https://tenxso.com")
+                        builder.AllowAnyOrigin()
                                .AllowAnyHeader()
-                               .AllowAnyMethod()
-                               .AllowCredentials();
+                               .AllowAnyMethod();
                     });
-
-
                 });
 
-                // SignalR for real-time communication
                 services.AddSignalR();
-
-                // Controllers and Swagger
                 services.AddControllers();
-                services.AddSwaggerGen(c =>
-                {
-                    c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
-                });
+                services.AddSwaggerGen();
 
             }
             catch (Exception ex)
@@ -126,11 +104,8 @@ namespace BackEnd
 
                 app.UseHttpsRedirection();
                 app.UseRouting();
+                app.UseMiddleware<SkipAuthorizationMiddleware>();
 
-                // CORS
-                app.UseCors("AllowSpecific");
-
-                // Logging Middleware
                 app.Use(async (context, next) =>
                 {
                     logger.LogInformation("Incoming Request: {Method} {Path}", context.Request.Method, context.Request.Path);
@@ -138,13 +113,15 @@ namespace BackEnd
                     logger.LogInformation("Response Status: {StatusCode}", context.Response.StatusCode);
                 });
 
-                // Middleware for skipping authorization (only if intentional)
-                app.UseMiddleware<SkipAuthorizationMiddleware>();
+                app.UseCors(builder => builder
+                    .WithOrigins("https://tenxso.com") // Explicitly specify the allowed origin
+                    .AllowAnyHeader()                 // Allow any headers
+                    .AllowAnyMethod()                 // Allow any HTTP methods (GET, POST, etc.)
+                    .AllowCredentials());             // Allow credentials (cookies, authentication)
 
-                // Authorization and Endpoints
+                logger.LogInformation("Middleware configured.");
+
                 app.UseAuthorization();
-
-
                 app.UseEndpoints(endpoints =>
                 {
                     endpoints.MapControllers();

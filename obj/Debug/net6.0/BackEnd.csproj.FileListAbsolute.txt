@@ -3,6 +3,7 @@ C:\CombinedFinalCode\bin\Debug\net6.0\Cosmos.CRTCompat.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\msvcp140.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\vcruntime140.dll
 C:\CombinedFinalCode\bin\Debug\net6.0\vcruntime140_1.dll
+C:\CombinedFinalCode\bin\Debug\net6.0\web.config
 C:\CombinedFinalCode\bin\Debug\net6.0\appsettings.Development.json
 C:\CombinedFinalCode\bin\Debug\net6.0\appsettings.json
 C:\CombinedFinalCode\bin\Debug\net6.0\BackEnd.exe
