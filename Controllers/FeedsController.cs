@@ -47,8 +47,8 @@ namespace BackEnd.Controllers
                 var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
                 Console.WriteLine($"Connecting to Blob Container: {_feedContainer}");
 
-                // Generate a unique Blob name
-                var blobName = $"{Guid.NewGuid()}_{Path.GetFileName(model.File.FileName)}";
+                // Generate a unique Blob names
+                var blobName = $"{ShortGuidGenerator.Generate()}_{Path.GetFileName(model.File.FileName)}";
                 var blobClient = containerClient.GetBlobClient(blobName);
                 Console.WriteLine($"Generated Blob Name: {blobName}");
 
@@ -87,7 +87,7 @@ namespace BackEnd.Controllers
                     PostId = Guid.NewGuid().ToString(),
                     Title = model.ProfilePic,
                     Content = $"{_cdnBaseUrl}{blobName}",
-                    Caption = string.IsNullOrEmpty(model.Caption) ? string.Empty : model.Caption,
+                    Caption = string.IsNullOrEmpty(model.Caption) || model.Caption == "undefined" ? string.Empty : model.Caption,
                     AuthorId = model.UserId,
                     AuthorUsername = model.UserName,
                     DateCreated = DateTime.UtcNow,
