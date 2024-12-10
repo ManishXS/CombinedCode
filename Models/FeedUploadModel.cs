@@ -8,9 +8,6 @@ namespace BackEnd.Models
         [JsonPropertyName("userId")]
         public string UserId { get; set; } = string.Empty;
 
-        [JsonPropertyName("description")]
-        public string Description { get; set; } = string.Empty;
-
         [JsonPropertyName("fileName")]
         public string FileName { get; set; } = string.Empty; // User-selected file name
 

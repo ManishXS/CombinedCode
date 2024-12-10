@@ -2,7 +2,8 @@
 using Azure.Storage.Blobs;
 using BackEnd.Entities;
 using Microsoft.Azure.Cosmos;
-using Microsoft.AspNetCore.Http.Features; // Added for FormOptions
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Logging;
 
 namespace BackEnd
 {
@@ -59,7 +60,7 @@ namespace BackEnd
 
                 services.AddSingleton<IConfiguration>(updatedConfiguration);
 
-                // Optional: Increase multipart request size limit (for local development/self-hosted)
+                // Increase multipart request size limit
                 services.Configure<FormOptions>(options =>
                 {
                     options.MultipartBodyLengthLimit = 209715200; // 200 MB limit
@@ -68,18 +69,18 @@ namespace BackEnd
                 // CORS configuration
                 services.AddCors(options =>
                 {
-                    options.AddPolicy("AllowAll", builder =>
+                    options.AddPolicy("AllowSpecificOrigin", builder =>
                     {
-                        builder.AllowAnyOrigin()
-                               .AllowAnyHeader()
-                               .AllowAnyMethod();
+                        builder.WithOrigins("https://tenxso.com") // Allow only the specified origin
+                               .AllowAnyHeader()                   // Allow all headers
+                               .AllowAnyMethod()                   // Allow all HTTP methods
+                               .AllowCredentials();                // Allow credentials (cookies, authentication)
                     });
                 });
 
                 services.AddSignalR();
                 services.AddControllers();
                 services.AddSwaggerGen();
-
             }
             catch (Exception ex)
             {
@@ -104,6 +105,10 @@ namespace BackEnd
 
                 app.UseHttpsRedirection();
                 app.UseRouting();
+
+                // Apply CORS middleware here
+                app.UseCors("AllowSpecificOrigin");
+
                 app.UseMiddleware<SkipAuthorizationMiddleware>();
 
                 app.Use(async (context, next) =>
@@ -113,15 +118,8 @@ namespace BackEnd
                     logger.LogInformation("Response Status: {StatusCode}", context.Response.StatusCode);
                 });
 
-                app.UseCors(builder => builder
-                    .WithOrigins("https://tenxso.com") // Explicitly specify the allowed origin
-                    .AllowAnyHeader()                 // Allow any headers
-                    .AllowAnyMethod()                 // Allow any HTTP methods (GET, POST, etc.)
-                    .AllowCredentials());             // Allow credentials (cookies, authentication)
-
-                logger.LogInformation("Middleware configured.");
-
                 app.UseAuthorization();
+
                 app.UseEndpoints(endpoints =>
                 {
                     endpoints.MapControllers();
