@@ -124,9 +124,9 @@ namespace BackEnd.Controllers
             try
             {
                 var userPosts = new List<UserPost>();
-                //  var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}"; // Pagination logic
+                var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY f.dateCreated DESC, f.likeCount, f.commentCount OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}"; // Pagination logic
 
-                var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY COALESCE(f.likeCount, 0) + COALESCE(f.commentCount, 0) DESC, f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}";
+                //  var queryString = $"SELECT * FROM f WHERE f.type='post' ORDER BY COALESCE(f.likeCount, 0) + COALESCE(f.commentCount, 0) DESC, f.dateCreated DESC OFFSET {(pageNumber - 1) * pageSize} LIMIT {pageSize}";
 
                 var queryFromPostsContainer = _dbContext.PostsContainer.GetItemQueryIterator<UserPost>(new QueryDefinition(queryString));
                     while (queryFromPostsContainer.HasMoreResults)
