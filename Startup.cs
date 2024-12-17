@@ -13,7 +13,9 @@ namespace BackEnd
 
         public Startup(IConfiguration configuration)
         {
+            // Store the passed configuration for later use
             _configuration = configuration;
+            Console.WriteLine("Startup constructor called.");
         }
 
         public void ConfigureServices(IServiceCollection services)
@@ -22,6 +24,8 @@ namespace BackEnd
             {
                 Console.WriteLine("Starting ConfigureServices...");
 
+                // Connect to Azure App Configuration
+                // NOTE: Replace the secret with your actual configuration or ensure this is managed via Key Vault
                 var appConfigConnectionString = "Endpoint=https://azurermtenx.azconfig.io;" +
                                                 "Id=8FPB;" +
                                                 "Secret=3NCoPOSo0Y1ykrX6ih9ObYVbY2ZA6RLqaXyMyBI04eB5k4wkhpA5JQQJ99AKACGhslBY0DYHAAACAZAC1woJ";
@@ -35,16 +39,20 @@ namespace BackEnd
                     })
                     .Build();
 
+                // Retrieve required configuration settings
                 var cosmosDbConnectionString = updatedConfiguration["CosmosDbConnectionString"];
                 var blobConnectionString = updatedConfiguration["BlobConnectionString"];
                 var apiKey = updatedConfiguration["ApiKey"];
 
-                if (string.IsNullOrEmpty(cosmosDbConnectionString) || string.IsNullOrEmpty(blobConnectionString) || string.IsNullOrEmpty(apiKey))
+                if (string.IsNullOrEmpty(cosmosDbConnectionString) ||
+                    string.IsNullOrEmpty(blobConnectionString) ||
+                    string.IsNullOrEmpty(apiKey))
                 {
+                    Console.WriteLine("Error: Missing CosmosDbConnectionString or BlobConnectionString or ApiKey.");
                     throw new Exception("Required configuration is missing. Check CosmosDbConnectionString, BlobConnectionString, and ApiKey.");
                 }
 
-                // Cosmos DB configuration
+                // Configure Cosmos DB client
                 CosmosClientOptions clientOptions = new CosmosClientOptions
                 {
                     ConnectionMode = ConnectionMode.Direct,
@@ -55,32 +63,42 @@ namespace BackEnd
                 services.AddSingleton(cosmosClient);
                 services.AddScoped<CosmosDbContext>();
 
-                // Blob Service configuration
+                // Configure Blob Service client
                 services.AddSingleton(x => new BlobServiceClient(blobConnectionString));
 
+                // Make the updated configuration available for DI
                 services.AddSingleton<IConfiguration>(updatedConfiguration);
 
-                // Increase multipart request size limit
+                // Increase multipart request size limit if needed
                 services.Configure<FormOptions>(options =>
                 {
-                    options.MultipartBodyLengthLimit = 209715200; // 200 MB limit
+                    // Set a large body length limit (200 MB)
+                    options.MultipartBodyLengthLimit = 209715200;
                 });
 
                 // CORS configuration
+                // We need to ensure that the Access-Control-Allow-Origin header matches the requesting origin exactly.
+                // Since we allow credentials, we cannot use '*'.
+                // Here we specify the allowed origin explicitly.
                 services.AddCors(options =>
                 {
                     options.AddPolicy("AllowSpecificOrigin", builder =>
                     {
-                        builder.WithOrigins("https://tenxso.com") // Allow only the specified origin
-                               .AllowAnyHeader()                   // Allow all headers
-                               .AllowAnyMethod()                   // Allow all HTTP methods
-                               .AllowCredentials();                // Allow credentials (cookies, authentication)
+                        builder.WithOrigins("https://tenxso.com")    // Explicitly allow this origin
+                               .AllowAnyHeader()                    // Allow all headers
+                               .AllowAnyMethod()                    // Allow all methods
+                               .AllowCredentials();                  // Allow credentials (this requires no wildcard in origins)
                     });
                 });
 
+                // Add SignalR
                 services.AddSignalR();
+
+                // Add Controllers and Swagger
                 services.AddControllers();
                 services.AddSwaggerGen();
+
+                Console.WriteLine("ConfigureServices completed successfully.");
             }
             catch (Exception ex)
             {
@@ -95,22 +113,30 @@ namespace BackEnd
             {
                 logger.LogInformation("Starting Configure...");
 
+                // If in Development, enable Swagger UI for easier testing
                 if (env.IsDevelopment())
                 {
                     app.UseDeveloperExceptionPage();
                     app.UseSwagger();
                     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1"));
-                    logger.LogInformation("Development mode - Swagger UI enabled.");
+                    logger.LogInformation("Development environment detected - Swagger UI enabled.");
                 }
 
+                // Enforce HTTPS redirection
                 app.UseHttpsRedirection();
+
+                // Add routing
                 app.UseRouting();
 
-                // Apply CORS middleware here
+                // Apply CORS policy before other middlewares that handle requests
+                logger.LogInformation("Applying CORS policy...");
                 app.UseCors("AllowSpecificOrigin");
 
+                // Use custom middleware (if you have a middleware to skip authorization)
+                logger.LogInformation("Applying custom middleware: SkipAuthorizationMiddleware");
                 app.UseMiddleware<SkipAuthorizationMiddleware>();
 
+                // Log incoming requests and outgoing responses
                 app.Use(async (context, next) =>
                 {
                     logger.LogInformation("Incoming Request: {Method} {Path}", context.Request.Method, context.Request.Path);
@@ -118,19 +144,27 @@ namespace BackEnd
                     logger.LogInformation("Response Status: {StatusCode}", context.Response.StatusCode);
                 });
 
+                // Use Authorization after CORS
                 app.UseAuthorization();
 
+                // Map controllers and hubs
                 app.UseEndpoints(endpoints =>
                 {
                     endpoints.MapControllers();
+
+                    // Include the chat hub URL here
+                    // Clients will connect to: https://<your-app-url>/chatHub
+                    logger.LogInformation("Mapping SignalR Hub at /chatHub");
                     endpoints.MapHub<ChatHub>("/chatHub");
                 });
 
                 logger.LogInformation("Application configured successfully.");
+                Console.WriteLine("Configure method completed successfully.");
             }
             catch (Exception ex)
             {
                 logger.LogError($"Error in Configure: {ex.Message}");
+                Console.WriteLine($"Error in Configure: {ex.Message}");
                 throw;
             }
         }
