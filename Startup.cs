@@ -77,9 +77,13 @@ namespace BackEnd
                 });
 
                 // CORS configuration
-                // We need to ensure that the Access-Control-Allow-Origin header matches the requesting origin exactly.
-                // Since we allow credentials, we cannot use '*'.
-                // Here we specify the allowed origin explicitly.
+                // We need to ensure that the Access-Control-Allow-Origin header matches the requesting origin.
+                // Since we want to allow all origins for development and we do not need credentials, we can use AllowAnyOrigin.
+                //
+                // If you need credentials, remember you cannot use AllowAnyOrigin; you must specify exact origins.
+                //
+                // Below is a configuration that allows all origins, headers, and methods without credentials:
+                //
                 //services.AddCors(options =>
                 //{
                 //    options.AddPolicy("AllowSpecificOrigin", builder =>
@@ -95,15 +99,13 @@ namespace BackEnd
                 {
                     options.AddPolicy("AllowSpecificOrigin", builder =>
                     {
-                        // In development, you can allow any origin, header, and method.
-                        // Note: If you need to allow credentials from a wildcard origin, 
-                        // you must specify the origin explicitly instead of using '*'.
+                        // Allow all origins, headers, and methods
+                        // No credentials allowed with '*'
                         builder.AllowAnyOrigin()
                                .AllowAnyHeader()
                                .AllowAnyMethod();
                     });
                 });
-
 
                 // Add SignalR
                 services.AddSignalR();
