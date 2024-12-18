@@ -80,16 +80,30 @@ namespace BackEnd
                 // We need to ensure that the Access-Control-Allow-Origin header matches the requesting origin exactly.
                 // Since we allow credentials, we cannot use '*'.
                 // Here we specify the allowed origin explicitly.
+                //services.AddCors(options =>
+                //{
+                //    options.AddPolicy("AllowSpecificOrigin", builder =>
+                //    {
+                //        builder.WithOrigins("https://tenxso.com")  
+                //               .AllowAnyHeader()                    
+                //               .AllowAnyMethod()                   
+                //               .AllowCredentials();                
+                //    });
+                //});
+
                 services.AddCors(options =>
                 {
                     options.AddPolicy("AllowSpecificOrigin", builder =>
                     {
-                        builder.WithOrigins("https://tenxso.com")    // Explicitly allow this origin
-                               .AllowAnyHeader()                    // Allow all headers
-                               .AllowAnyMethod()                    // Allow all methods
-                               .AllowCredentials();                  // Allow credentials (this requires no wildcard in origins)
+                        // In development, you can allow any origin, header, and method.
+                        // Note: If you need to allow credentials from a wildcard origin, 
+                        // you must specify the origin explicitly instead of using '*'.
+                        builder.AllowAnyOrigin()
+                               .AllowAnyHeader()
+                               .AllowAnyMethod();
                     });
                 });
+
 
                 // Add SignalR
                 services.AddSignalR();
