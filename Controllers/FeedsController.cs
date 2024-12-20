@@ -208,6 +208,35 @@ namespace BackEnd.Controllers
             }
         }
 
+        [HttpGet("download")]
+        public async Task<IActionResult> DownloadFile([FromQuery] string fileName)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    return BadRequest("File name is required.");
+                }
+
+                var containerClient = _blobServiceClient.GetBlobContainerClient(_feedContainer);
+                var blobClient = containerClient.GetBlobClient(fileName);
+
+                if (!await blobClient.ExistsAsync())
+                {
+                    return NotFound("File not found.");
+                }
+
+                var downloadInfo = await blobClient.DownloadAsync();
+
+                return File(downloadInfo.Value.Content, downloadInfo.Value.ContentType, fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error downloading file: {ex.Message}");
+                return StatusCode(500, "Error downloading file.");
+            }
+        }
+
         // CRC32 checksum implementation
         public class Crc32 : HashAlgorithm
         {
