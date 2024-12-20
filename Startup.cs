@@ -7,7 +7,7 @@ using tusdotnet;
 using tusdotnet.Models;
 using tusdotnet.Models.Configuration;
 using tusdotnet.Stores;
-
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 namespace BackEnd
 {
@@ -66,8 +66,21 @@ namespace BackEnd
 
                 services.Configure<FormOptions>(options =>
                 {
-                    options.MultipartBodyLengthLimit = 209715200;
+                    options.MultipartBodyLengthLimit = 500 * 1024 * 1024;
                 });
+
+                services.Configure<IISServerOptions>(options =>
+                {
+                    options.MaxRequestBodySize = 500 * 1024 * 1024;
+                });
+
+                services.Configure<KestrelServerOptions>(options =>
+                {
+                    options.Limits.MaxRequestBodySize = 500 * 1024 * 1024;
+                    options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(10);
+                    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
+                });
+
 
                 services.AddCors(options =>
                 {
