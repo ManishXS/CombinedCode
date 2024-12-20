@@ -81,7 +81,6 @@ namespace BackEnd
                     options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
                 });
 
-
                 services.AddCors(options =>
                 {
                     options.AddPolicy("AllowSpecificOrigin", builder =>
@@ -92,7 +91,6 @@ namespace BackEnd
                     });
                 });
 
-                services.AddSignalR();
                 services.AddControllers();
                 services.AddSwaggerGen();
 
@@ -127,7 +125,7 @@ namespace BackEnd
                 {
                     Store = new TusDiskStore(Path.Combine(env.ContentRootPath, "uploads")),
                     UrlPath = "/files",
-                    MaxAllowedUploadSizeInBytes = 500 * 1024 * 1024, // 500 MB limit
+                    MaxAllowedUploadSizeInBytes = 500 * 1024 * 1024,
                     Events = new Events
                     {
                         OnFileCompleteAsync = async ctx =>
@@ -139,7 +137,6 @@ namespace BackEnd
                     }
                 });
 
-                logger.LogInformation("Applying custom middleware: SkipAuthorizationMiddleware");
                 app.UseMiddleware<SkipAuthorizationMiddleware>();
 
                 app.Use(async (context, next) =>
@@ -154,8 +151,6 @@ namespace BackEnd
                 app.UseEndpoints(endpoints =>
                 {
                     endpoints.MapControllers();
-                    logger.LogInformation("Mapping SignalR Hub at /chatHub");
-                    endpoints.MapHub<ChatHub>("/chatHub");
                 });
 
                 logger.LogInformation("Application configured successfully.");
