@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "jBD7lhpm/da1Ay+RMyLDlw1IfdKa79RobAb6LJwb/bw5Ssak4AaXwkY79V1wqO93Po+MURR7BbFmEr1/pUsV8w==",
+  "dgSpecHash": "5k8EF1Npuue2EnMSAvMVCgDakwVhpHP5J+ToL6D1m8E1aJwHbagK9fKecKv7dOF3yiGNsZu8KsQurn9ibli6BQ==",
   "success": true,
   "projectFilePath": "C:\\CombinedFinalCode\\BackEnd.csproj",
   "expectedPackageFiles": [
@@ -115,7 +115,8 @@
     "C:\\Users\\MANISH\\.nuget\\packages\\system.threading.tasks\\4.3.0\\system.threading.tasks.4.3.0.nupkg.sha512",
     "C:\\Users\\MANISH\\.nuget\\packages\\system.threading.tasks.extensions\\4.5.4\\system.threading.tasks.extensions.4.5.4.nupkg.sha512",
     "C:\\Users\\MANISH\\.nuget\\packages\\system.valuetuple\\4.5.0\\system.valuetuple.4.5.0.nupkg.sha512",
-    "C:\\Users\\MANISH\\.nuget\\packages\\system.windows.extensions\\6.0.0\\system.windows.extensions.6.0.0.nupkg.sha512"
+    "C:\\Users\\MANISH\\.nuget\\packages\\system.windows.extensions\\6.0.0\\system.windows.extensions.6.0.0.nupkg.sha512",
+    "C:\\Users\\MANISH\\.nuget\\packages\\tusdotnet\\2.8.0\\tusdotnet.2.8.0.nupkg.sha512"
   ],
   "logs": []
 }

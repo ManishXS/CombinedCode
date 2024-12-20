@@ -88,6 +88,10 @@
             "Swashbuckle.AspNetCore": {
               "target": "Package",
               "version": "[6.5.0, )"
+            },
+            "tusdotnet": {
+              "target": "Package",
+              "version": "[2.8.0, )"
             }
           },
           "imports": [

@@ -18,7 +18,8 @@
           "Microsoft.Extensions.Configuration.Json": "8.0.1",
           "Newtonsoft.Json": "13.0.3",
           "StackExchange.Redis": "2.8.16",
-          "Swashbuckle.AspNetCore": "6.5.0"
+          "Swashbuckle.AspNetCore": "6.5.0",
+          "tusdotnet": "2.8.0"
         },
         "runtime": {
           "BackEnd.dll": {}
@@ -1075,6 +1076,14 @@
             "fileVersion": "6.0.21.52210"
           }
         }
+      },
+      "tusdotnet/2.8.0": {
+        "runtime": {
+          "lib/net6.0/tusdotnet.dll": {
+            "assemblyVersion": "2.8.0.0",
+            "fileVersion": "2.8.0.0"
+          }
+        }
       }
     }
   },
@@ -1867,6 +1876,13 @@
       "sha512": "sha512-IXoJOXIqc39AIe+CIR7koBtRGMiCt/LPM3lI+PELtDIy9XdyeSrwXFdWV9dzJ2Awl0paLWUaknLxFQ5HpHZUog==",
       "path": "system.windows.extensions/6.0.0",
       "hashPath": "system.windows.extensions.6.0.0.nupkg.sha512"
+    },
+    "tusdotnet/2.8.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-NGXl50tNhHaLI6LzP7A2Dk3C8iQ51tNDLCTxIE7GcssWZ6VUb5ZWr+wvHeeJZZlE21crxIBFmMUcBmMLNTbXiA==",
+      "path": "tusdotnet/2.8.0",
+      "hashPath": "tusdotnet.2.8.0.nupkg.sha512"
     }
   }
 }

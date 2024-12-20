@@ -93,3 +93,4 @@ C:\CombinedFinalCode\obj\Debug\net6.0\refint\BackEnd.dll
 C:\CombinedFinalCode\obj\Debug\net6.0\BackEnd.pdb
 C:\CombinedFinalCode\obj\Debug\net6.0\BackEnd.genruntimeconfig.cache
 C:\CombinedFinalCode\obj\Debug\net6.0\ref\BackEnd.dll
+C:\CombinedFinalCode\bin\Debug\net6.0\tusdotnet.dll
