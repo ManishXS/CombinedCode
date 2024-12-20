@@ -8,6 +8,7 @@ using tusdotnet.Models;
 using tusdotnet.Models.Configuration;
 using tusdotnet.Stores;
 
+
 namespace BackEnd
 {
     public class Startup
@@ -113,16 +114,14 @@ namespace BackEnd
                 {
                     Store = new TusDiskStore(Path.Combine(env.ContentRootPath, "uploads")),
                     UrlPath = "/files",
-                    MaxAllowedUploadSizeInBytes = 500 * 1024 * 1024,
+                    MaxAllowedUploadSizeInBytes = 500 * 1024 * 1024, // 500 MB limit
                     Events = new Events
                     {
                         OnFileCompleteAsync = async ctx =>
                         {
-                            var store = (TusDiskStore)ctx.Store;
                             var fileId = ctx.FileId;
                             var filePath = Path.Combine(env.ContentRootPath, "uploads", fileId);
-
-                            Console.WriteLine($"File {fileId} has been fully uploaded. Path: {filePath}");
+                            logger.LogInformation($"File {fileId} has been fully uploaded. Path: {filePath}");
                         }
                     }
                 });

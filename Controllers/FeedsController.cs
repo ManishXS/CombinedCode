@@ -5,6 +5,11 @@ using StackExchange.Redis;
 using BackEnd.Entities;
 using BackEnd.Models;
 using System.Security.Cryptography;
+using tusdotnet.Models.Configuration;
+using tusdotnet.Models;
+using tusdotnet.Stores;
+using tusdotnet.Helpers;
+
 // Make sure to include the namespace for ShortGuidGenerator
 
 
@@ -184,8 +189,8 @@ namespace BackEnd.Controllers
                 // Note: If LikeCount or CommentCount are null, we default to 0.
                 Console.WriteLine("Reordering posts by LikeCount, CommentCount, and DateCreated...");
                 userPosts = userPosts
-                    .OrderByDescending(x => x.LikeCount)    
-                    .ThenByDescending(x => x.CommentCount)  
+                    .OrderByDescending(x => x.LikeCount)
+                    .ThenByDescending(x => x.CommentCount)
                     .ThenByDescending(x => x.DateCreated)
                     .ToList();
 
@@ -202,60 +207,60 @@ namespace BackEnd.Controllers
                 return StatusCode(500, $"Error retrieving feeds: {ex.Message}");
             }
         }
-    }
 
-    // CRC32 checksum implementation
-    public class Crc32 : HashAlgorithm
-    {
-        private const uint Polynomial = 0xedb88320;
-        private readonly uint[] table = new uint[256];
-        private uint crc = 0xffffffff;
-
-        public Crc32()
+        // CRC32 checksum implementation
+        public class Crc32 : HashAlgorithm
         {
-            // Initialize CRC32 lookup table
-            InitializeTable();
-            HashSizeValue = 32;
-        }
+            private const uint Polynomial = 0xedb88320;
+            private readonly uint[] table = new uint[256];
+            private uint crc = 0xffffffff;
 
-        private void InitializeTable()
-        {
-            // Build a CRC32 lookup table for all byte values
-            for (uint i = 0; i < 256; i++)
+            public Crc32()
             {
-                uint entry = i;
-                for (int j = 0; j < 8; j++)
+                // Initialize CRC32 lookup table
+                InitializeTable();
+                HashSizeValue = 32;
+            }
+
+            private void InitializeTable()
+            {
+                // Build a CRC32 lookup table for all byte values
+                for (uint i = 0; i < 256; i++)
                 {
-                    if ((entry & 1) == 1)
-                        entry = (entry >> 1) ^ Polynomial;
-                    else
-                        entry >>= 1;
+                    uint entry = i;
+                    for (int j = 0; j < 8; j++)
+                    {
+                        if ((entry & 1) == 1)
+                            entry = (entry >> 1) ^ Polynomial;
+                        else
+                            entry >>= 1;
+                    }
+                    table[i] = entry;
                 }
-                table[i] = entry;
             }
-        }
 
-        public override void Initialize()
-        {
-            // Reset the CRC
-            crc = 0xffffffff;
-        }
-
-        protected override void HashCore(byte[] array, int ibStart, int cbSize)
-        {
-            // Compute the CRC on the provided array chunk
-            for (int i = ibStart; i < ibStart + cbSize; i++)
+            public override void Initialize()
             {
-                byte index = (byte)(crc ^ array[i]);
-                crc = (crc >> 8) ^ table[index];
+                // Reset the CRC
+                crc = 0xffffffff;
             }
-        }
 
-        protected override byte[] HashFinal()
-        {
-            // Finalize the CRC calculation
-            crc ^= 0xffffffff;
-            return BitConverter.GetBytes(crc);
+            protected override void HashCore(byte[] array, int ibStart, int cbSize)
+            {
+                // Compute the CRC on the provided array chunk
+                for (int i = ibStart; i < ibStart + cbSize; i++)
+                {
+                    byte index = (byte)(crc ^ array[i]);
+                    crc = (crc >> 8) ^ table[index];
+                }
+            }
+
+            protected override byte[] HashFinal()
+            {
+                // Finalize the CRC calculation
+                crc ^= 0xffffffff;
+                return BitConverter.GetBytes(crc);
+            }
         }
     }
 }
