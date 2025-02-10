@@ -1,13 +1,13 @@
-﻿using Azure.Storage.Blobs;
-using BackEnd.Entities;
+﻿using Azure.Identity;
+using Azure.Storage.Blobs;
 using Microsoft.Azure.Cosmos;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Extensions.Logging;
 using tusdotnet;
 using tusdotnet.Models;
 using tusdotnet.Models.Configuration;
 using tusdotnet.Stores;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using BackEnd.Entities;
 
 namespace BackEnd
 {
@@ -27,27 +27,26 @@ namespace BackEnd
             {
                 Console.WriteLine("Starting ConfigureServices...");
 
-                var appConfigConnectionString = "Endpoint=https://azurermtenx.azconfig.io;" +
-                                                "Id=8FPB;" +
-                                                "Secret=3NCoPOSo0Y1ykrX6ih9ObYVbY2ZA6RLqaXyMyBI04eB5k4wkhpA5JQQJ99AKACGhslBY0DYHAAACAZAC1woJ";
+                var keyVaultUrl = _configuration["KeyVault:Url"];
 
-                var updatedConfiguration = new ConfigurationBuilder()
+                if (string.IsNullOrEmpty(keyVaultUrl))
+                {
+                    Console.WriteLine("Error: Missing Key Vault URL.");
+                    throw new Exception("Key Vault URL is missing in configuration.");
+                }
+
+                var Configuration = new ConfigurationBuilder()
                     .AddConfiguration(_configuration)
-                    .AddAzureAppConfiguration(options =>
-                    {
-                        options.Connect(appConfigConnectionString);
-                    })
+                    .AddAzureKeyVault(new Uri(keyVaultUrl), new DefaultAzureCredential())
                     .Build();
 
-                var cosmosDbConnectionString = updatedConfiguration["CosmosDbConnectionString"];
-                var blobConnectionString = updatedConfiguration["BlobConnectionString"];
-                var apiKey = updatedConfiguration["ApiKey"];
+                var cosmosDbConnectionString = Configuration["cosmosDbConnectionString"];
+                var blobConnectionString = Configuration["blobConnectionString"];
 
                 if (string.IsNullOrEmpty(cosmosDbConnectionString) ||
-                    string.IsNullOrEmpty(blobConnectionString) ||
-                    string.IsNullOrEmpty(apiKey))
+                    string.IsNullOrEmpty(blobConnectionString))
                 {
-                    Console.WriteLine("Error: Missing CosmosDbConnectionString or BlobConnectionString or ApiKey.");
+                    Console.WriteLine("Error: Missing CosmosDbConnectionString or BlobStorageConnectionString.");
                     throw new Exception("Required configuration is missing.");
                 }
 
@@ -62,7 +61,7 @@ namespace BackEnd
                 services.AddScoped<CosmosDbContext>();
 
                 services.AddSingleton(new BlobServiceClient(blobConnectionString));
-                services.AddSingleton<IConfiguration>(updatedConfiguration);
+                services.AddSingleton<IConfiguration>(Configuration);
 
                 services.Configure<FormOptions>(options =>
                 {
