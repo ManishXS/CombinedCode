@@ -8,6 +8,7 @@ using tusdotnet.Models.Configuration;
 using tusdotnet.Stores;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using BackEnd.Entities;
+using Microsoft.OpenApi.Models;
 
 namespace BackEnd
 {
@@ -91,7 +92,10 @@ namespace BackEnd
                 });
 
                 services.AddControllers();
-                services.AddSwaggerGen();
+                services.AddSwaggerGen(c =>
+                {
+                    c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
+                });
 
                 Console.WriteLine("ConfigureServices completed successfully.");
             }
