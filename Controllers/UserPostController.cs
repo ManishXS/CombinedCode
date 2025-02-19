@@ -13,7 +13,7 @@ namespace BackEnd.Controllers
     {
         private readonly CosmosDbContext _dbContext;
         private readonly BlobServiceClient _blobServiceClient;
-        private readonly string _feedContainer = "media";  // Blob container for storing feeds
+        private readonly string _feedContainer = "media";  
 
         public UserPostController(CosmosDbContext dbContext, BlobServiceClient blobServiceClient)
         {
@@ -163,7 +163,7 @@ namespace BackEnd.Controllers
                     var blogPostComment = new UserPostComment
                     {
                         CommentId = Guid.NewGuid().ToString(),
-                        PostId = model.PostId,
+                        PostId = Guid.NewGuid().ToString(),
                         CommentContent = model.CommentContent,
                         CommentAuthorId = model.CommentAuthorId,
                         CommentAuthorUsername = model.CommentAuthorUsername,
@@ -174,7 +174,16 @@ namespace BackEnd.Controllers
  
                     var obj = new dynamic[] { blogPostComment.PostId, blogPostComment };
 
-                    var result = await _dbContext.PostsContainer.Scripts.ExecuteStoredProcedureAsync<string>("createComment", new PartitionKey(blogPostComment.PostId), obj);
+                    try
+                    {
+                        var result = await _dbContext.PostsContainer.Scripts.ExecuteStoredProcedureAsync<string>("createComment", new PartitionKey(blogPostComment.PostId), obj);
+                    }
+                    catch(Exception ex)
+                    {
+                        var e = ex.Message;
+                    }
+
+                   
                 }
             }
 
